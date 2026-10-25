@@ -9,7 +9,7 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
-    background: #0d0f1a;
+    background: #2b2d33;
     font-family: system-ui, -apple-system, sans-serif;
   }
   canvas { display: block; }
@@ -55,8 +55,8 @@
 <div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
   <h1>Zombie Maze</h1>
-  <p>You are lost in an endless labyrinth full of zombies. You shoot automatically at any zombie you can see.</p>
-  <p>They close in from beyond the edges of the screen. Move with WASD or the arrow keys.</p>
+  <p>You are lost in the endless streets of a zombie-infested New York. You shoot automatically at any zombie you can see.</p>
+  <p>They close in from around every block. Move with WASD or the arrow keys.</p>
   <p>Grab the purple bonuses to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
@@ -70,11 +70,12 @@ const shotsEl = document.getElementById("shots");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("start");
 
-const CELL = 64;
-const WALL = 8;
+const CELL = 80;
+const WALL = 24;
 const CHUNK = 8;
-const CHUNK_PAD = 20;
 const CHUNK_KEEP_DISTANCE = 5;
+const CANVAS_KEEP_DISTANCE = 2;
+const SIDEWALK = 6;
 const LOOP_CHANCE = 0.15;
 const PATH_MARGIN = 6;
 const MAX_ENEMIES = 120;
@@ -180,22 +181,159 @@ function leftWall(c, r) {
   return getChunk(cx, cy).v[r - cy * CHUNK][c - cx * CHUNK];
 }
 
+// ---------- New York look ----------
+// Walls are drawn as rows of buildings and corridors as streets. Every detail is
+// derived from a hash of the wall's world position, so a building that overlaps
+// two chunks is drawn identically in both and the chunk images tile seamlessly.
+
+const ASPHALT = "#2b2d33";
+const ROOFS = ["#8a4b3c", "#6b4a3a", "#7a7d82", "#a68a6d", "#4a4a4f", "#5b6470", "#94573f"];
+
+function hash(a, b, salt) {
+  let h = worldSeed ^ Math.imul(a, 0x27d4eb2d) ^ Math.imul(b, 0x165667b1) ^ Math.imul(salt, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function wallRect(c, r, vertical) {
+  return vertical
+    ? { x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: WALL, h: CELL + WALL, c, r, o: 1 }
+    : { x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: CELL + WALL, h: WALL, c, r, o: 0 };
+}
+
+function drawStreets(m, chunk) {
+  const c0 = chunk.cx * CHUNK, r0 = chunk.cy * CHUNK;
+  m.fillStyle = ASPHALT;
+  m.fillRect(c0 * CELL, r0 * CELL, CHUNK * CELL, CHUNK * CELL);
+
+  const inner = WALL / 2 + SIDEWALK + 2;
+  for (let r = r0; r < r0 + CHUNK; r++) {
+    for (let c = c0; c < c0 + CHUNK; c++) {
+      const up = !topWall(c, r), down = !topWall(c, r + 1);
+      const left = !leftWall(c, r), right = !leftWall(c + 1, r);
+      const x0 = c * CELL, y0 = r * CELL;
+      const mx = x0 + CELL / 2, my = y0 + CELL / 2;
+
+      if (up + down + left + right >= 3) {
+        m.fillStyle = "rgba(225, 225, 225, 0.8)";
+        for (let s = inner; s + 4 <= CELL - inner; s += 8) {
+          if (right) m.fillRect(x0 + CELL - 14, y0 + s, 11, 4);
+          if (left) m.fillRect(x0 + 3, y0 + s, 11, 4);
+          if (down) m.fillRect(x0 + s, y0 + CELL - 14, 4, 11);
+          if (up) m.fillRect(x0 + s, y0 + 3, 4, 11);
+        }
+      } else {
+        m.fillStyle = "#d9a62e";
+        for (const d of [4, 22]) {
+          if (right) m.fillRect(mx + d, my - 1, 12, 2);
+          if (left) m.fillRect(mx - d - 12, my - 1, 12, 2);
+          if (down) m.fillRect(mx - 1, my + d, 2, 12);
+          if (up) m.fillRect(mx - 1, my - d - 12, 2, 12);
+        }
+      }
+    }
+  }
+}
+
+function drawBuilding(m, w) {
+  const h = salt => hash(w.c * 2 + w.o, w.r, salt);
+  const horizontal = w.o === 0;
+  const at = (t, off) => horizontal
+    ? [w.x + t * w.w, w.y + w.h / 2 + off]
+    : [w.x + w.w / 2 + off, w.y + t * w.h];
+
+  m.fillStyle = ROOFS[Math.floor(h(1) * ROOFS.length)];
+  m.fillRect(w.x, w.y, w.w, w.h);
+  m.fillStyle = "rgba(255, 255, 255, 0.1)";
+  m.fillRect(w.x, w.y, w.w, 2);
+  m.fillRect(w.x, w.y, 2, w.h);
+  m.strokeStyle = "rgba(0, 0, 0, 0.35)";
+  m.lineWidth = 2;
+  m.strokeRect(w.x + 2, w.y + 2, w.w - 4, w.h - 4);
+
+  if (h(2) < 0.5) {
+    const [sx, sy] = at(0.3 + h(3) * 0.4, 0);
+    m.fillStyle = "rgba(0, 0, 0, 0.4)";
+    if (horizontal) m.fillRect(sx - 1, w.y + 2, 2, w.h - 4);
+    else m.fillRect(w.x + 2, sy - 1, w.w - 4, 2);
+  }
+
+  const kind = h(4);
+  if (kind < 0.35) {
+    const [x, y] = at(0.2 + h(5) * 0.6, 0);
+    circle(x + 2, y + 2, 6.5, "rgba(0, 0, 0, 0.35)", m);
+    circle(x, y, 6.5, "#7b5e45", m);
+    m.strokeStyle = "#3e2723";
+    m.lineWidth = 1.5;
+    m.stroke();
+    circle(x, y, 2.5, "#5d4037", m);
+  } else if (kind < 0.8) {
+    const count = 1 + Math.floor(h(6) * 3);
+    for (let i = 0; i < count; i++) {
+      const [x, y] = at(0.18 + i * 0.27 + h(7 + i) * 0.08, (h(10 + i) - 0.5) * 6);
+      m.fillStyle = "#b0bec5";
+      m.fillRect(x - 3.5, y - 3, 7, 6);
+      m.strokeStyle = "#546e7a";
+      m.lineWidth = 1;
+      m.strokeRect(x - 3.5, y - 3, 7, 6);
+    }
+  } else {
+    const [x, y] = at(0.3 + h(13) * 0.4, 0);
+    m.fillStyle = "rgba(144, 202, 249, 0.55)";
+    m.fillRect(x - 5, y - 4, 10, 8);
+  }
+}
+
+function drawTree(m, w) {
+  const h = salt => hash(w.c * 2 + w.o, w.r, salt);
+  if (h(20) > 0.4) return;
+  const side = h(21) < 0.5 ? -1 : 1;
+  const t = 0.25 + h(22) * 0.5;
+  const off = side * (WALL / 2 + 4);
+  const x = w.o === 0 ? w.x + t * w.w : w.x + w.w / 2 + off;
+  const y = w.o === 0 ? w.y + w.h / 2 + off : w.y + t * w.h;
+  circle(x + 2, y + 2, 6, "rgba(0, 0, 0, 0.35)", m);
+  circle(x, y, 6, "#2e7d32", m);
+  circle(x - 1.5, y - 1.5, 3, "#43a047", m);
+}
+
 function chunkCanvas(chunk) {
   if (chunk.canvas) return chunk.canvas;
-  const size = CHUNK * CELL + CHUNK_PAD * 2;
+  const size = CHUNK * CELL;
   const cv = document.createElement("canvas");
   cv.width = cv.height = size;
   const m = cv.getContext("2d");
-  m.translate(CHUNK_PAD, CHUNK_PAD);
-  m.shadowColor = "#5c6bc0";
-  m.shadowBlur = 12;
-  m.fillStyle = "#3949ab";
-  for (let r = 0; r < CHUNK; r++) {
-    for (let c = 0; c < CHUNK; c++) {
-      if (chunk.h[r][c]) m.fillRect(c * CELL - WALL / 2, r * CELL - WALL / 2, CELL + WALL, WALL);
-      if (chunk.v[r][c]) m.fillRect(c * CELL - WALL / 2, r * CELL - WALL / 2, WALL, CELL + WALL);
+  const ox = chunk.cx * size, oy = chunk.cy * size;
+  m.translate(-ox, -oy);
+  m.beginPath();
+  m.rect(ox, oy, size, size);
+  m.clip();
+
+  drawStreets(m, chunk);
+
+  const c0 = chunk.cx * CHUNK, r0 = chunk.cy * CHUNK;
+  const ws = [];
+  for (let r = r0 - 1; r <= r0 + CHUNK; r++) {
+    for (let c = c0 - 1; c <= c0 + CHUNK; c++) {
+      if (topWall(c, r)) ws.push(wallRect(c, r, false));
+      if (leftWall(c, r)) ws.push(wallRect(c, r, true));
     }
   }
+
+  m.fillStyle = "#44474d";
+  for (const w of ws) m.fillRect(w.x - SIDEWALK - 1, w.y - SIDEWALK - 1, w.w + SIDEWALK * 2 + 2, w.h + SIDEWALK * 2 + 2);
+  m.fillStyle = "#6e727a";
+  for (const w of ws) m.fillRect(w.x - SIDEWALK, w.y - SIDEWALK, w.w + SIDEWALK * 2, w.h + SIDEWALK * 2);
+
+  m.fillStyle = "rgba(0, 0, 0, 0.35)";
+  m.beginPath();
+  for (const w of ws) m.rect(w.x + 5, w.y + 7, w.w, w.h);
+  m.fill();
+
+  for (const w of ws) drawTree(m, w);
+  for (const w of ws) drawBuilding(m, w);
+
   chunk.canvas = cv;
   return cv;
 }
@@ -204,9 +342,9 @@ function evictFarChunks() {
   const pcx = Math.floor(player.x / CELL / CHUNK);
   const pcy = Math.floor(player.y / CELL / CHUNK);
   for (const [key, chunk] of chunks) {
-    if (Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cy - pcy)) > CHUNK_KEEP_DISTANCE) {
-      chunks.delete(key);
-    }
+    const d = Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cy - pcy));
+    if (d > CHUNK_KEEP_DISTANCE) chunks.delete(key);
+    else if (d > CANVAS_KEEP_DISTANCE) chunk.canvas = null;
   }
 }
 
@@ -233,8 +371,8 @@ function wallsNear(x, y) {
   for (let dr = -1; dr <= 1; dr++) {
     for (let dc = -1; dc <= 1; dc++) {
       const cc = c + dc, rr = r + dr;
-      if (topWall(cc, rr)) rects.push({ x: cc * CELL - WALL / 2, y: rr * CELL - WALL / 2, w: CELL + WALL, h: WALL });
-      if (leftWall(cc, rr)) rects.push({ x: cc * CELL - WALL / 2, y: rr * CELL - WALL / 2, w: WALL, h: CELL + WALL });
+      if (topWall(cc, rr)) rects.push(wallRect(cc, rr, false));
+      if (leftWall(cc, rr)) rects.push(wallRect(cc, rr, true));
     }
   }
   return rects;
@@ -669,27 +807,23 @@ function update(dt) {
   particles = particles.filter(p => p.life > 0);
 }
 
-function circle(x, y, r, color) {
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
+function circle(x, y, r, color, g = ctx) {
+  g.beginPath();
+  g.arc(x, y, r, 0, Math.PI * 2);
+  g.fillStyle = color;
+  g.fill();
 }
 
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#0d0f1a";
+  ctx.fillStyle = ASPHALT;
   ctx.fillRect(0, 0, W, H);
   ctx.translate(-Math.round(camX), -Math.round(camY));
 
   const chunkSize = CHUNK * CELL;
-  const cx0 = Math.floor((camX - CHUNK_PAD) / chunkSize);
-  const cx1 = Math.floor((camX + W + CHUNK_PAD) / chunkSize);
-  const cy0 = Math.floor((camY - CHUNK_PAD) / chunkSize);
-  const cy1 = Math.floor((camY + H + CHUNK_PAD) / chunkSize);
-  for (let cy = cy0; cy <= cy1; cy++) {
-    for (let cx = cx0; cx <= cx1; cx++) {
-      ctx.drawImage(chunkCanvas(getChunk(cx, cy)), cx * chunkSize - CHUNK_PAD, cy * chunkSize - CHUNK_PAD);
+  for (let cy = Math.floor(camY / chunkSize); cy <= Math.floor((camY + H) / chunkSize); cy++) {
+    for (let cx = Math.floor(camX / chunkSize); cx <= Math.floor((camX + W) / chunkSize); cx++) {
+      ctx.drawImage(chunkCanvas(getChunk(cx, cy)), cx * chunkSize, cy * chunkSize);
     }
   }
 
