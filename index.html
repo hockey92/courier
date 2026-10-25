@@ -17,6 +17,9 @@
     position: fixed;
     top: 12px;
     left: 16px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.55);
     color: #fff;
     font-size: 18px;
     user-select: none;
@@ -52,8 +55,8 @@
 <div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
   <h1>Ball Defender</h1>
-  <p>You are trapped in a labyrinth. Your ball shoots automatically at any enemy it can see.</p>
-  <p>Enemies pour out of the four corners. Move with WASD or the arrow keys.</p>
+  <p>You are lost in an endless labyrinth. Your ball shoots automatically at any enemy it can see.</p>
+  <p>Enemies close in from beyond the edges of the screen. Move with WASD or the arrow keys.</p>
   <p>Grab the purple bonuses to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
@@ -69,21 +72,20 @@ const startBtn = document.getElementById("start");
 
 const CELL = 64;
 const WALL = 8;
-const HUD_HEIGHT = 48;
+const CHUNK = 8;
+const CHUNK_PAD = 20;
+const CHUNK_KEEP_DISTANCE = 5;
 const LOOP_CHANCE = 0.15;
+const PATH_MARGIN = 6;
 const MAX_ENEMIES = 120;
 const MAX_SHOTS = 7;
 const BONUS_DURATION = 10;
 const BONUS_LIFETIME = 8;
 
 let W, H;
-let cols, rows, ox = 0, oy = 0, hWalls, vWalls, walls = [], mazeCanvas, corners;
-let dist, distCell = "";
-
 function resize() {
   W = canvas.width = window.innerWidth;
   H = canvas.height = window.innerHeight;
-  if (cols) layout();
 }
 window.addEventListener("resize", resize);
 resize();
@@ -92,78 +94,124 @@ const keys = {};
 window.addEventListener("keydown", e => (keys[e.key.toLowerCase()] = true));
 window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
 
-function layout() {
-  ox = Math.floor((W - cols * CELL) / 2);
-  oy = Math.floor(HUD_HEIGHT + (H - HUD_HEIGHT - rows * CELL) / 2);
+// ---------- Endless maze ----------
+// The world is split into CHUNK x CHUNK blocks of cells. Each chunk is a seeded
+// random maze that owns its top and left border walls, and always opens at least
+// one gap in each of them, so every chunk connects to its neighbours.
+
+let worldSeed = 0;
+const chunks = new Map();
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-function buildMaze() {
-  cols = Math.max(5, Math.floor((W - 40) / CELL));
-  rows = Math.max(5, Math.floor((H - HUD_HEIGHT - 20) / CELL));
-  hWalls = Array.from({ length: rows + 1 }, () => Array(cols).fill(true));
-  vWalls = Array.from({ length: rows }, () => Array(cols + 1).fill(true));
+function chunkSeed(cx, cy) {
+  let h = worldSeed ^ Math.imul(cx, 0x9e3779b1) ^ Math.imul(cy, 0x85ebca77);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
 
-  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
-  const stack = [[0, 0]];
-  visited[0][0] = true;
+function generateChunk(cx, cy) {
+  const rand = mulberry32(chunkSeed(cx, cy));
+  const h = Array.from({ length: CHUNK }, () => Array(CHUNK).fill(true));
+  const v = Array.from({ length: CHUNK }, () => Array(CHUNK).fill(true));
+  const visited = Array.from({ length: CHUNK }, () => Array(CHUNK).fill(false));
+
+  const start = [Math.floor(rand() * CHUNK), Math.floor(rand() * CHUNK)];
+  const stack = [start];
+  visited[start[1]][start[0]] = true;
   while (stack.length) {
     const [c, r] = stack[stack.length - 1];
     const options = [];
     if (r > 0 && !visited[r - 1][c]) options.push([c, r - 1]);
-    if (r < rows - 1 && !visited[r + 1][c]) options.push([c, r + 1]);
+    if (r < CHUNK - 1 && !visited[r + 1][c]) options.push([c, r + 1]);
     if (c > 0 && !visited[r][c - 1]) options.push([c - 1, r]);
-    if (c < cols - 1 && !visited[r][c + 1]) options.push([c + 1, r]);
+    if (c < CHUNK - 1 && !visited[r][c + 1]) options.push([c + 1, r]);
     if (!options.length) { stack.pop(); continue; }
-    const [nc, nr] = options[Math.floor(Math.random() * options.length)];
-    if (nr < r) hWalls[r][c] = false;
-    else if (nr > r) hWalls[nr][c] = false;
-    else if (nc < c) vWalls[r][c] = false;
-    else vWalls[r][nc] = false;
+    const [nc, nr] = options[Math.floor(rand() * options.length)];
+    if (nr < r) h[r][c] = false;
+    else if (nr > r) h[nr][c] = false;
+    else if (nc < c) v[r][c] = false;
+    else v[r][nc] = false;
     visited[nr][nc] = true;
     stack.push([nc, nr]);
   }
 
-  for (let r = 1; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (hWalls[r][c] && Math.random() < LOOP_CHANCE) hWalls[r][c] = false;
-  for (let r = 0; r < rows; r++)
-    for (let c = 1; c < cols; c++)
-      if (vWalls[r][c] && Math.random() < LOOP_CHANCE) vWalls[r][c] = false;
+  for (let r = 1; r < CHUNK; r++)
+    for (let c = 0; c < CHUNK; c++)
+      if (h[r][c] && rand() < LOOP_CHANCE) h[r][c] = false;
+  for (let r = 0; r < CHUNK; r++)
+    for (let c = 1; c < CHUNK; c++)
+      if (v[r][c] && rand() < LOOP_CHANCE) v[r][c] = false;
 
-  walls = [];
-  for (let r = 0; r <= rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (hWalls[r][c]) walls.push({ x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: CELL + WALL, h: WALL });
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c <= cols; c++)
-      if (vWalls[r][c]) walls.push({ x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: WALL, h: CELL + WALL });
+  for (let i = 0; i < 2; i++) {
+    h[0][Math.floor(rand() * CHUNK)] = false;
+    v[Math.floor(rand() * CHUNK)][0] = false;
+  }
 
-  corners = [
-    { c: 0, r: 0 },
-    { c: cols - 1, r: 0 },
-    { c: 0, r: rows - 1 },
-    { c: cols - 1, r: rows - 1 },
-  ];
+  return { cx, cy, h, v, canvas: null };
+}
 
-  mazeCanvas = document.createElement("canvas");
-  mazeCanvas.width = cols * CELL + 40;
-  mazeCanvas.height = rows * CELL + 40;
-  const m = mazeCanvas.getContext("2d");
-  m.translate(20, 20);
+function getChunk(cx, cy) {
+  const key = cx * 1e6 + cy;
+  let chunk = chunks.get(key);
+  if (!chunk) {
+    chunk = generateChunk(cx, cy);
+    chunks.set(key, chunk);
+  }
+  return chunk;
+}
+
+function topWall(c, r) {
+  const cx = Math.floor(c / CHUNK), cy = Math.floor(r / CHUNK);
+  return getChunk(cx, cy).h[r - cy * CHUNK][c - cx * CHUNK];
+}
+
+function leftWall(c, r) {
+  const cx = Math.floor(c / CHUNK), cy = Math.floor(r / CHUNK);
+  return getChunk(cx, cy).v[r - cy * CHUNK][c - cx * CHUNK];
+}
+
+function chunkCanvas(chunk) {
+  if (chunk.canvas) return chunk.canvas;
+  const size = CHUNK * CELL + CHUNK_PAD * 2;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const m = cv.getContext("2d");
+  m.translate(CHUNK_PAD, CHUNK_PAD);
   m.shadowColor = "#5c6bc0";
   m.shadowBlur = 12;
   m.fillStyle = "#3949ab";
-  for (const w of walls) m.fillRect(w.x, w.y, w.w, w.h);
+  for (let r = 0; r < CHUNK; r++) {
+    for (let c = 0; c < CHUNK; c++) {
+      if (chunk.h[r][c]) m.fillRect(c * CELL - WALL / 2, r * CELL - WALL / 2, CELL + WALL, WALL);
+      if (chunk.v[r][c]) m.fillRect(c * CELL - WALL / 2, r * CELL - WALL / 2, WALL, CELL + WALL);
+    }
+  }
+  chunk.canvas = cv;
+  return cv;
+}
 
-  distCell = "";
-  layout();
+function evictFarChunks() {
+  const pcx = Math.floor(player.x / CELL / CHUNK);
+  const pcy = Math.floor(player.y / CELL / CHUNK);
+  for (const [key, chunk] of chunks) {
+    if (Math.max(Math.abs(chunk.cx - pcx), Math.abs(chunk.cy - pcy)) > CHUNK_KEEP_DISTANCE) {
+      chunks.delete(key);
+    }
+  }
 }
 
 function cellOf(x, y) {
-  return {
-    c: Math.max(0, Math.min(cols - 1, Math.floor(x / CELL))),
-    r: Math.max(0, Math.min(rows - 1, Math.floor(y / CELL))),
-  };
+  return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
 }
 
 function cellCenter(c, r) {
@@ -172,34 +220,28 @@ function cellCenter(c, r) {
 
 function openNeighbors(c, r) {
   const n = [];
-  if (r > 0 && !hWalls[r][c]) n.push({ c, r: r - 1 });
-  if (r < rows - 1 && !hWalls[r + 1][c]) n.push({ c, r: r + 1 });
-  if (c > 0 && !vWalls[r][c]) n.push({ c: c - 1, r });
-  if (c < cols - 1 && !vWalls[r][c + 1]) n.push({ c: c + 1, r });
+  if (!topWall(c, r)) n.push({ c, r: r - 1 });
+  if (!topWall(c, r + 1)) n.push({ c, r: r + 1 });
+  if (!leftWall(c, r)) n.push({ c: c - 1, r });
+  if (!leftWall(c + 1, r)) n.push({ c: c + 1, r });
   return n;
 }
 
-function updateDistances() {
-  const { c, r } = cellOf(player.x, player.y);
-  const key = c + "," + r;
-  if (key === distCell) return;
-  distCell = key;
-  dist = Array.from({ length: rows }, () => Array(cols).fill(Infinity));
-  dist[r][c] = 0;
-  const queue = [{ c, r }];
-  for (let i = 0; i < queue.length; i++) {
-    const cur = queue[i];
-    for (const n of openNeighbors(cur.c, cur.r)) {
-      if (dist[n.r][n.c] === Infinity) {
-        dist[n.r][n.c] = dist[cur.r][cur.c] + 1;
-        queue.push(n);
-      }
+function wallsNear(x, y) {
+  const { c, r } = cellOf(x, y);
+  const rects = [];
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const cc = c + dc, rr = r + dr;
+      if (topWall(cc, rr)) rects.push({ x: cc * CELL - WALL / 2, y: rr * CELL - WALL / 2, w: CELL + WALL, h: WALL });
+      if (leftWall(cc, rr)) rects.push({ x: cc * CELL - WALL / 2, y: rr * CELL - WALL / 2, w: WALL, h: CELL + WALL });
     }
   }
+  return rects;
 }
 
 function pushOutOfWalls(o) {
-  for (const w of walls) {
+  for (const w of wallsNear(o.x, o.y)) {
     if (o.x + o.r < w.x || o.x - o.r > w.x + w.w || o.y + o.r < w.y || o.y - o.r > w.y + w.h) continue;
     const nx = Math.max(w.x, Math.min(o.x, w.x + w.w));
     const ny = Math.max(w.y, Math.min(o.y, w.y + w.h));
@@ -224,7 +266,7 @@ function pushOutOfWalls(o) {
 }
 
 function hitsWall(x, y, r) {
-  for (const w of walls) {
+  for (const w of wallsNear(x, y)) {
     const nx = Math.max(w.x, Math.min(x, w.x + w.w));
     const ny = Math.max(w.y, Math.min(y, w.y + w.h));
     if ((x - nx) ** 2 + (y - ny) ** 2 < r * r) return true;
@@ -232,34 +274,82 @@ function hitsWall(x, y, r) {
   return false;
 }
 
-function segmentHitsRect(x1, y1, x2, y2, w) {
-  let t0 = 0, t1 = 1;
-  const axes = [[x1, x2 - x1, w.x, w.x + w.w], [y1, y2 - y1, w.y, w.y + w.h]];
-  for (const [p, d, min, max] of axes) {
-    if (Math.abs(d) < 1e-9) {
-      if (p < min || p > max) return false;
+function lineOfSight(x1, y1, x2, y2) {
+  let { c, r } = cellOf(x1, y1);
+  const end = cellOf(x2, y2);
+  const dx = x2 - x1, dy = y2 - y1;
+  const stepC = Math.sign(dx), stepR = Math.sign(dy);
+  let tMaxX = dx ? ((stepC > 0 ? (c + 1) * CELL : c * CELL) - x1) / dx : Infinity;
+  let tMaxY = dy ? ((stepR > 0 ? (r + 1) * CELL : r * CELL) - y1) / dy : Infinity;
+  const tDeltaX = dx ? CELL / Math.abs(dx) : Infinity;
+  const tDeltaY = dy ? CELL / Math.abs(dy) : Infinity;
+  const maxSteps = Math.abs(end.c - c) + Math.abs(end.r - r) + 2;
+  for (let i = 0; i < maxSteps; i++) {
+    if (c === end.c && r === end.r) return true;
+    if (tMaxX < tMaxY) {
+      if (leftWall(stepC > 0 ? c + 1 : c, r)) return false;
+      c += stepC;
+      tMaxX += tDeltaX;
     } else {
-      let ta = (min - p) / d, tb = (max - p) / d;
-      if (ta > tb) [ta, tb] = [tb, ta];
-      t0 = Math.max(t0, ta);
-      t1 = Math.min(t1, tb);
-      if (t0 > t1) return false;
+      if (topWall(c, stepR > 0 ? r + 1 : r)) return false;
+      r += stepR;
+      tMaxY += tDeltaY;
     }
   }
   return true;
 }
 
-function lineOfSight(x1, y1, x2, y2) {
-  for (const w of walls) if (segmentHitsRect(x1, y1, x2, y2, w)) return false;
-  return true;
+// ---------- Path finding toward the player ----------
+
+let dist, distKey = "", boxC0, boxR0, boxW, boxH;
+
+function updateDistances() {
+  const { c, r } = cellOf(player.x, player.y);
+  const halfW = Math.ceil(W / CELL / 2) + PATH_MARGIN;
+  const halfH = Math.ceil(H / CELL / 2) + PATH_MARGIN;
+  const key = `${c},${r},${halfW},${halfH}`;
+  if (key === distKey) return;
+  distKey = key;
+  boxC0 = c - halfW;
+  boxR0 = r - halfH;
+  boxW = halfW * 2 + 1;
+  boxH = halfH * 2 + 1;
+  dist = new Float32Array(boxW * boxH).fill(Infinity);
+  dist[(r - boxR0) * boxW + (c - boxC0)] = 0;
+  const queue = [{ c, r }];
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    const d = getDist(cur.c, cur.r);
+    for (const n of openNeighbors(cur.c, cur.r)) {
+      if (!inBox(n.c, n.r)) continue;
+      const idx = (n.r - boxR0) * boxW + (n.c - boxC0);
+      if (dist[idx] === Infinity) {
+        dist[idx] = d + 1;
+        queue.push(n);
+      }
+    }
+  }
 }
+
+function inBox(c, r) {
+  return c >= boxC0 && c < boxC0 + boxW && r >= boxR0 && r < boxR0 + boxH;
+}
+
+function getDist(c, r) {
+  return inBox(c, r) ? dist[(r - boxR0) * boxW + (c - boxC0)] : Infinity;
+}
+
+// ---------- Game state ----------
 
 let player, bullets, enemies, particles, bonuses, score, lives, elapsed;
 let shootTimer, spawnTimer, invulnerable, running = false, lastTime = 0;
-let shots, shotsTimer, bonusTimer;
+let shots, shotsTimer, bonusTimer, evictTimer, camX = 0, camY = 0;
 
 function reset() {
-  const start = cellCenter(Math.floor(cols / 2), Math.floor(rows / 2));
+  worldSeed = (Math.random() * 2 ** 32) >>> 0;
+  chunks.clear();
+  distKey = "";
+  const start = cellCenter(0, 0);
   player = { x: start.x, y: start.y, r: 16, speed: 220 };
   bullets = [];
   enemies = [];
@@ -274,9 +364,33 @@ function reset() {
   shots = 1;
   shotsTimer = 0;
   bonusTimer = 6;
+  evictTimer = 2;
+  updateCamera();
   scoreEl.textContent = score;
   livesEl.textContent = lives;
   updateShotsHud();
+}
+
+function updateCamera() {
+  camX = player.x - W / 2;
+  camY = player.y - H / 2;
+}
+
+function visibleCells() {
+  return {
+    c0: Math.floor(camX / CELL),
+    c1: Math.floor((camX + W) / CELL),
+    r0: Math.floor(camY / CELL),
+    r1: Math.floor((camY + H) / CELL),
+  };
+}
+
+function onScreen(x, y, margin = 0) {
+  return x > camX - margin && x < camX + W + margin && y > camY - margin && y < camY + H + margin;
+}
+
+function randInt(min, max) {
+  return min + Math.floor(Math.random() * (max - min + 1));
 }
 
 function updateShotsHud() {
@@ -284,37 +398,52 @@ function updateShotsHud() {
 }
 
 function spawnBonus() {
+  const { c0, c1, r0, r1 } = visibleCells();
   const pc = cellOf(player.x, player.y);
-  let c, r;
-  do {
-    c = Math.floor(Math.random() * cols);
-    r = Math.floor(Math.random() * rows);
-  } while (c === pc.c && r === pc.r);
-  const p = cellCenter(c, r);
-  bonuses.push({ x: p.x, y: p.y, r: 12, life: BONUS_LIFETIME });
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const c = randInt(c0 + 1, c1 - 1);
+    const r = randInt(r0 + 1, r1 - 1);
+    const d = getDist(c, r);
+    if (d < 2 || d === Infinity || (c === pc.c && r === pc.r)) continue;
+    const p = cellCenter(c, r);
+    bonuses.push({ x: p.x, y: p.y, r: 12, life: BONUS_LIFETIME });
+    return;
+  }
 }
 
 function spawnEnemy() {
   if (enemies.length >= MAX_ENEMIES) return;
-  const corner = corners[Math.floor(Math.random() * corners.length)];
-  const p = cellCenter(corner.c, corner.r);
-  const r = 9 + Math.random() * 7;
-  const hp = r > 13 ? 2 : 1;
-  const speed = 45 + Math.random() * 30 + elapsed * 1.2;
-  const hue = Math.floor(Math.random() * 60);
-  enemies.push({
-    x: p.x + (Math.random() - 0.5) * 10,
-    y: p.y + (Math.random() - 0.5) * 10,
-    r, hp, speed,
-    color: `hsl(${hue}, 85%, 60%)`,
-  });
+  const { c0, c1, r0, r1 } = visibleCells();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let c, r;
+    const side = Math.floor(Math.random() * 4);
+    if (side === 0) { c = randInt(c0 - 1, c1 + 1); r = r0 - 1; }
+    else if (side === 1) { c = c1 + 1; r = randInt(r0 - 1, r1 + 1); }
+    else if (side === 2) { c = randInt(c0 - 1, c1 + 1); r = r1 + 1; }
+    else { c = c0 - 1; r = randInt(r0 - 1, r1 + 1); }
+    if (getDist(c, r) === Infinity) continue;
+
+    const p = cellCenter(c, r);
+    const radius = 9 + Math.random() * 7;
+    const hue = Math.floor(Math.random() * 60);
+    enemies.push({
+      x: p.x + (Math.random() - 0.5) * 10,
+      y: p.y + (Math.random() - 0.5) * 10,
+      r: radius,
+      hp: radius > 13 ? 2 : 1,
+      speed: 45 + Math.random() * 30 + elapsed * 1.2,
+      color: `hsl(${hue}, 85%, 60%)`,
+    });
+    return;
+  }
 }
 
 function nearestVisibleEnemy() {
-  const sorted = enemies
+  const candidates = enemies
+    .filter(e => onScreen(e.x, e.y))
     .map(e => ({ e, d: (e.x - player.x) ** 2 + (e.y - player.y) ** 2 }))
     .sort((a, b) => a.d - b.d);
-  for (const { e } of sorted) {
+  for (const { e } of candidates) {
     if (lineOfSight(player.x, player.y, e.x, e.y)) return e;
   }
   return null;
@@ -348,9 +477,10 @@ function explode(x, y, color, count = 14) {
 
 function moveEnemy(e, dt) {
   const { c, r } = cellOf(e.x, e.y);
+  const d = getDist(c, r);
   let tx = player.x, ty = player.y;
-  if (dist[r][c] > 0 && dist[r][c] !== Infinity) {
-    const next = openNeighbors(c, r).find(n => dist[n.r][n.c] < dist[r][c]);
+  if (d > 0 && d !== Infinity) {
+    const next = openNeighbors(c, r).find(n => getDist(n.c, n.r) < d);
     if (next) {
       const here = cellCenter(c, r);
       const there = cellCenter(next.c, next.r);
@@ -359,11 +489,11 @@ function moveEnemy(e, dt) {
     }
   }
   const dx = tx - e.x, dy = ty - e.y;
-  const d = Math.hypot(dx, dy);
-  if (d > 0) {
-    const step = Math.min(d, e.speed * dt);
-    e.x += (dx / d) * step;
-    e.y += (dy / d) * step;
+  const len = Math.hypot(dx, dy);
+  if (len > 0) {
+    const step = Math.min(len, e.speed * dt);
+    e.x += (dx / len) * step;
+    e.y += (dy / len) * step;
   }
 }
 
@@ -398,7 +528,14 @@ function update(dt) {
     player.y += (dy / len) * player.speed * dt;
     pushOutOfWalls(player);
   }
+  updateCamera();
   updateDistances();
+
+  evictTimer -= dt;
+  if (evictTimer <= 0) {
+    evictFarChunks();
+    evictTimer = 2;
+  }
 
   const fireInterval = Math.max(0.08, 0.2 - elapsed * 0.002);
   shootTimer -= dt;
@@ -442,19 +579,29 @@ function update(dt) {
   updateShotsHud();
 
   for (const b of bullets) {
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    if (hitsWall(b.x, b.y, b.r)) {
-      b.dead = true;
-      explode(b.x, b.y, "#fff59d", 3);
+    const steps = Math.ceil(Math.hypot(b.vx, b.vy) * dt / 6);
+    for (let s = 0; s < steps; s++) {
+      b.x += (b.vx * dt) / steps;
+      b.y += (b.vy * dt) / steps;
+      if (hitsWall(b.x, b.y, b.r)) {
+        b.dead = true;
+        explode(b.x, b.y, "#fff59d", 3);
+        break;
+      }
     }
+    if (!onScreen(b.x, b.y, 50)) b.dead = true;
   }
 
-  for (const e of enemies) moveEnemy(e, dt);
+  for (const e of enemies) {
+    const { c, r } = cellOf(e.x, e.y);
+    if (!inBox(c, r)) e.dead = true;
+    else moveEnemy(e, dt);
+  }
   separateEnemies();
   for (const e of enemies) pushOutOfWalls(e);
 
   for (const e of enemies) {
+    if (e.dead) continue;
     for (const b of bullets) {
       if (b.dead) continue;
       if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (e.r + b.r) ** 2) {
@@ -509,20 +656,19 @@ function circle(x, y, r, color) {
 
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "rgba(13, 15, 26, 0.35)";
+  ctx.fillStyle = "#0d0f1a";
   ctx.fillRect(0, 0, W, H);
-  ctx.translate(ox, oy);
+  ctx.translate(-Math.round(camX), -Math.round(camY));
 
-  ctx.drawImage(mazeCanvas, -20, -20);
-
-  const glow = 0.4 + Math.sin(elapsed * 4) * 0.2;
-  for (const corner of corners) {
-    const p = cellCenter(corner.c, corner.r);
-    ctx.strokeStyle = `rgba(255, 82, 82, ${glow})`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, CELL * 0.32, 0, Math.PI * 2);
-    ctx.stroke();
+  const chunkSize = CHUNK * CELL;
+  const cx0 = Math.floor((camX - CHUNK_PAD) / chunkSize);
+  const cx1 = Math.floor((camX + W + CHUNK_PAD) / chunkSize);
+  const cy0 = Math.floor((camY - CHUNK_PAD) / chunkSize);
+  const cy1 = Math.floor((camY + H + CHUNK_PAD) / chunkSize);
+  for (let cy = cy0; cy <= cy1; cy++) {
+    for (let cx = cx0; cx <= cx1; cx++) {
+      ctx.drawImage(chunkCanvas(getChunk(cx, cy)), cx * chunkSize - CHUNK_PAD, cy * chunkSize - CHUNK_PAD);
+    }
   }
 
   for (const p of particles) {
@@ -551,6 +697,7 @@ function draw() {
   }
 
   for (const e of enemies) {
+    if (!onScreen(e.x, e.y, 30)) continue;
     circle(e.x, e.y, e.r, e.color);
     if (e.hp > 1) {
       ctx.strokeStyle = "#fff";
@@ -583,11 +730,7 @@ function loop(time) {
 }
 
 function start() {
-  buildMaze();
   reset();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#0d0f1a";
-  ctx.fillRect(0, 0, W, H);
   overlay.classList.add("hidden");
   running = true;
   lastTime = performance.now();
