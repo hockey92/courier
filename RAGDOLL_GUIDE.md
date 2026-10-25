@@ -348,7 +348,10 @@ Three layers, kept separate on purpose:
 
 Where a ragdoll lives comes from its `world` option: `{ boxesNear, floorAt, zMin, zMax, step }`
 (`step` is the tallest ledge it walks straight up onto). It defaults to `GAME_WORLD`, the game's street;
-`montague.js` passes its own so the hero can walk Montague St (§16).
+`montague.js` passes its own so the hero can walk Montague St (§16), and `heightsworld.js` its own for
+Brooklyn Heights (§17). `boxesNear` is called as `boxesNear(x, range, z)`; the game's and Montague's ignore
+the `z`, Brooklyn Heights uses it to look boxes up in a grid. A box may also have a `bottom`: it's then a deck
+that bodies and limbs pass under when they're below it (footbridges, the Brooklyn Bridge's walkway).
 
 ### Attacks
 - `Ragdoll.swing(t, windup, hold, back)` turns an attack timer into `[wind, ext]` amounts (0…1):
@@ -700,3 +703,51 @@ The game's hero walks it in his saved skin.
 - Cameras: `walk` (over the shoulder, like the behind view) and `look` (free, Street View style; **R**
   goes back to the photo's viewpoint); **V** switches. `window.street` exposes `hero`, `tick`, `boxes`,
   `setMode` and `resetView`.
+
+## 17. Brooklyn Heights (`heights.html`, `ragdoll/heights*.js`, `ragdoll/batch.js`)
+
+Another separate page: the stretch of Brooklyn circled on a map, from the Brooklyn Bridge and Old Fulton St
+down to Atlantic Ave, and from Brooklyn Bridge Park's piers across to Cadman Plaza and Borough Hall, at
+roughly real scale (about 1.2 × 1.4 km). Sunny late afternoon in October. The game's hero walks it.
+
+- **Axes:** the map is turned to the Heights' street grid: `x` runs grid-east (towards Cadman Plaza), `z`
+  grid-south (towards Atlantic Ave); the grid is tilted `GRID_TILT` = 21° from true north, which only the
+  minimap uses. Streets run exactly along x or z.
+- **Levels:** the Heights stand on a plateau at `TOP = 16`, sidewalks `CURB = 0.15` above; the waterfront
+  (Furman St, the park, the piers) is at `WF = 2`. The ragdoll's limbs can't go below 0, so everything
+  stands on boxes rather than dipping under the ground. Old Fulton St, Joralemon St and Atlantic Ave run down
+  the bluff (`DESCENTS`) as slopes you see and `STEP = 0.2` stairs you walk; the Squibb Park footbridge and
+  the Brooklyn Bridge's walkway are stairs of decks (boxes with a `bottom`). The world lets him climb
+  `CLIMB = 0.25`, a little more than a stair, so rounding never stops him.
+- **`heightsmap.js`** is plain data, shared by the 3D page and the minimap: `NS` / `EW` streets (centre,
+  half-width `r`, extent — every street starts and ends on another street or the edge), `CELLS` (the
+  blocks between every street line, each with a sidewalk slab out to its curbs, building lots inside, the
+  streets it fronts and a `kind`: `rows`, `downtown`, `dumbo`, `cadman`, `courts`, `borough`, `squibb`,
+  `watchtower`, `bridge`), the bluff (`PROMENADE`, `BQE`), the waterfront (`UPLAND`, `LANDING`, `PIERS`,
+  `FURMAN`), the bridge (`BRIDGE`, `bridgeY(x)`), landmark footprints and `PLOTS` (churches and towers that
+  take over part of a block). Neighbouring cells with no street between them have slabs that meet.
+- **`heightsworld.js`** builds it all and owns the collision. `solid()` files small boxes in an 8 m grid and
+  keeps big ones (slabs, piers, the river) in a list; `boxesNear(x, range, z)`, `floorAt`, `inSolid`, and
+  `movers` (the street cars' live boxes). Blocks fill with rows of houses along each street they front:
+  `streetStyle` picks what a street gets (shops on Montague St and Atlantic Ave, offices on Court St, towers
+  on Cadman Plaza W, warehouses on Old Fulton St, otherwise a mix of brownstones, brick, painted and frame
+  rowhouses and the odd prewar apartment block), runs of the same style stick together, and each house gets
+  a cornice, a stoop with walkable steps and an areaway fence, or a door and canopy. The river is solid up to
+  `WF + 8` everywhere but the land, so nobody walks into it; the bridge walkway passes high above.
+- **`batch.js`** merges everything static: `Batch.box/prism/poly/geometry` collect faces per material and
+  per 300 m patch (so patches out of view are culled) and `finish()` makes one mesh each; walls use tiled
+  facade textures (one bay × one floor per tile, `tw` / `th` in metres). Plain-coloured parts share one
+  vertex-coloured material. Trees, lamps, lanterns, parked cars and hydrants are `instanced()`.
+  Materials with `userData.cast = false` (ground, far scenery) skip the shadow pass.
+- **`heights.js`** is the page: the light (the shadow box follows the hero), the hero, traffic in `LANES`
+  (one-way strips along x or z; street lanes stop for him and have collision boxes, the BQE's two decks
+  and the bridge's roadways don't), people walking the sidewalks, the Promenade, the park and the bridge
+  (hidden beyond 160 m), the cameras (the walk camera is pulled in front of walls and roofs), the street
+  name of where he is, and `PLACES` for the number keys. `window.heights` exposes `hero`, `tick`, `goTo`,
+  `setMode`, `traffic`, `walkers`, `PLACES` and `mini`.
+- **`heightsmini.js`** draws the street map once, Google-coloured, and shows it turned to true north: the
+  round minimap follows the hero; **Tab** (or a click on it) opens the full map, where a click on land
+  sends him there (`goTo` finds a clear spot at street level, or on the walkway when it's on the bridge).
+- Controls as on Montague St, except that he always runs at the game's pace and **Shift** sprints (2.2×,
+  through `hero.speed`), since the map is a kilometre across; plus **Tab** map, **1–7** places (Promenade, Brooklyn Bridge, Borough Hall,
+  Pier 1, Cadman Plaza Park, Montague St, Atlantic Ave), **Esc** closes the map.

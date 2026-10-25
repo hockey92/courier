@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brooklyn Heights</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #card { position: fixed; top: 14px; left: 14px; padding: 12px 16px; border-radius: 8px; background: #000b; color: #fff; user-select: none; max-width: 60vw; }
+  #card .name { font-weight: 600; font-size: 15px; }
+  #card .where { font-size: 14px; font-weight: 700; color: #9fe0b0; margin-top: 4px; }
+  #card .sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+  #card .help { font-size: 12px; opacity: 0.85; margin-top: 10px; line-height: 1.5; }
+  #mini { position: fixed; top: 14px; right: 14px; border-radius: 50%; box-shadow: 0 2px 10px #0008; cursor: pointer; }
+  #bigmap { position: fixed; inset: 0; display: none; cursor: crosshair; }
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="name">Brooklyn Heights</div>
+  <div class="where" id="where"></div>
+  <div class="sub">From the Brooklyn Bridge down to Atlantic Ave · late afternoon, sunny, 66°F</div>
+  <div class="sub" id="who"></div>
+  <div class="help" id="help"></div>
+</div>
+<canvas id="mini" width="200" height="200" title="Tab for the full map"></canvas>
+<canvas id="bigmap"></canvas>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module" src="ragdoll/heights.js"></script>
+<script>document.getElementById('mini').addEventListener('click', () => window.heights?.mini.toggle(true));</script>
+</body>
+</html>

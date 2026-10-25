@@ -135,8 +135,9 @@ export class Ragdoll {
 
     // obstacles block from the side unless the feet are above their top
     this.blocked = false;
-    for (const b of w.boxesNear(this.x, 4)) {
+    for (const b of w.boxesNear(this.x, 4, this.z)) {
       if (this.y >= b.top - w.step) continue;
+      if (b.bottom !== undefined && this.y + 1.8 <= b.bottom) continue; // walking under a deck
       const cx = Math.max(b.x0, Math.min(b.x1, this.x)), cz = Math.max(b.z0, Math.min(b.z1, this.z));
       let dx = this.x - cx, dz = this.z - cz;
       const d = Math.hypot(dx, dz);
@@ -479,7 +480,7 @@ export class Ragdoll {
       }
     }
     const { zMin, zMax } = this.world;
-    const solids = this.world.boxesNear(pts.hip.x, 5);
+    const solids = this.world.boxesNear(pts.hip.x, 5, pts.hip.z);
     for (let i = 0; i < 6; i++) {
       for (const [a, b, len, strength] of STICKS) {
         const p1 = pts[a], p2 = pts[b];
@@ -499,14 +500,17 @@ export class Ragdoll {
         q.z = Math.max(zMin - 0.4, Math.min(zMax + 0.4, q.z));
         // push limbs out of obstacles along the shallowest side
         for (const o of solids) {
-          if (q.x > o.x0 - r && q.x < o.x1 + r && q.z > o.z0 - r && q.z < o.z1 + r && q.y < o.top + r) {
-            const pen = [q.x - (o.x0 - r), o.x1 + r - q.x, q.z - (o.z0 - r), o.z1 + r - q.z, o.top + r - q.y];
+          // (a deck, with a bottom, can be walked under)
+          const under = o.bottom === undefined ? Infinity : q.y - (o.bottom - r);
+          if (q.x > o.x0 - r && q.x < o.x1 + r && q.z > o.z0 - r && q.z < o.z1 + r && q.y < o.top + r && under > 0) {
+            const pen = [q.x - (o.x0 - r), o.x1 + r - q.x, q.z - (o.z0 - r), o.z1 + r - q.z, o.top + r - q.y, under];
             const m = pen.indexOf(Math.min(...pen));
             if (m === 0) q.x = o.x0 - r;
             else if (m === 1) q.x = o.x1 + r;
             else if (m === 2) q.z = o.z0 - r;
             else if (m === 3) q.z = o.z1 + r;
-            else { q.y = o.top + r; q.px += (q.x - q.px) * 0.3; q.pz += (q.z - q.pz) * 0.3; }
+            else if (m === 4) { q.y = o.top + r; q.px += (q.x - q.px) * 0.3; q.pz += (q.z - q.pz) * 0.3; }
+            else q.y = o.bottom - r;
           }
         }
       }
