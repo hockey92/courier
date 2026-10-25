@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { camera, renderer, scene } from './scene.js';
 import { boxesNear, liveChunks, syncChunks } from './world.js';
 import { music } from './music.js';
-import { keys, queued } from './input.js';
+import { keys, mouse, queued } from './input.js';
 import { updateDust } from './effects.js';
 import { NAMES } from './ragdoll.js';
 import { gangsters, man } from './actors.js';
@@ -30,15 +30,17 @@ function update() {
     queued.aim = null;
     ix = iz = 0;
   } else if (state.camMode === 'behind') {
-    // steer: left/right turn him and the camera, up runs where the camera looks, down runs back towards it
-    if (man.alive) state.camYaw += right * 0.045;
+    // steer: left/right (or the grabbed mouse) turn him and the camera, up runs where the camera looks,
+    // down runs back towards it
+    if (man.alive) state.camYaw += right * 0.045 + mouse.turn;
     ix = Math.cos(state.camYaw) * -down; iz = Math.sin(state.camYaw) * -down;
-    if (right && !down && man.alive) {
+    if ((right || mouse.turn) && !down && man.alive) {
       let diff = state.camYaw - man.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       man.heading += diff * 0.3;
     }
   }
+  mouse.turn = 0;
   const wasDown = !man.alive;
   // a mouse attack turns him to face where it was clicked
   const aimed = queued.aim && man.alive && (queued.punch || queued.kick || queued.round);

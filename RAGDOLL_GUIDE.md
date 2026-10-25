@@ -436,7 +436,7 @@ help bar from `HELP_MOVE[mode]` + `HELP_REST`.
 | Space | jump, again in the air to flip | same |
 | F / G / H | punch / kick / round kick (auto-turns to the nearest gangster) | same |
 | E | pick up the crate or trash can you're next to; E again (or F) throws it | same |
-| Mouse | left click punch (or throw what he's holding), right click kick, middle or Shift+left click round kick; he turns to face the spot clicked, then to the nearest gangster in reach within 60° of it | same |
+| Mouse | the first click grabs the mouse (pointer lock, Esc lets go); moving it left/right turns him and the camera (`mouse.turn`, 0.0035 rad per pixel). Clicks attack where he faces: left click punch (or throw what he's holding), right click kick, middle or Shift+left click round kick | the mouse stays free; the same clicks turn him to face the spot clicked, then to the nearest gangster in reach within 60° of it |
 | C / V / M | next skin / switch camera / sound on-off | same |
 | R | play as Pizza Rat (see below) / back to the man | same |
 

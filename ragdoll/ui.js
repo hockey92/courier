@@ -26,12 +26,14 @@ skinName.textContent = SKINS[man.skin].name;
 // camera switch: the button in the corner or the V key
 export const camBtn = document.getElementById('camBtn'), helpBar = document.getElementById('help');
 export const HELP_MOVE = {
-  behind: '← → turn · ↑ run · ↓ run back',
+  behind: '← → turn · ↑ run · ↓ run back · click the game to steer with the mouse (Esc lets go)',
   side: '← → run · ↑ ↓ move up and down the street',
 };
-export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · mouse: left click punch / throw, right click kick, middle or Shift+click round kick, aimed at the cursor · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
+export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · mouse: left click punch / throw, right click kick, middle or Shift+click round kick (aimed at the cursor, or where he faces while steering with the mouse) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
 export function setCamMode(mode) {
   state.camMode = mode;
+  // mouse steering is only for the behind view
+  if (mode !== 'behind' && document.pointerLockElement) document.exitPointerLock();
   localStorage.setItem('ragdollCam', mode);
   if (mode === 'behind') {
     state.camYaw = man.heading;
@@ -59,6 +61,7 @@ export const SEWER_HELP = '← → turn · ↑ scurry · ↓ back up · Space ho
 export function setPlayingRat(on) {
   state.playingRat = on;
   state.ratPlayer = on ? rats[0] : null;
+  if (on && document.pointerLockElement) document.exitPointerLock();
   for (const g of gangsters) g.cancelAttacks();
   if (on) {
     // Pizza Rat pops out a couple of steps ahead of the man (so the camera isn't inside his legs), facing the same way
