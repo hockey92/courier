@@ -877,8 +877,10 @@ function shadow(y, rx) {
 function drawMan(p) {
   const facing = Math.cos(p.aim) >= 0 ? 1 : -1;
   const swing = p.moving ? Math.sin(p.walk) * 4 : 0;
-  const skin = "#f1c27d";
-  const shirt = "#26a69a";
+  const skin = "#e0a878";
+  const shirt = "#b71c1c";
+  const vest = "#6d4c41";
+  const leather = "#8d5524";
 
   ctx.save();
   ctx.translate(p.x, p.y);
@@ -886,28 +888,64 @@ function drawMan(p) {
   shadow(16, 11);
   ctx.scale(facing, 1);
 
-  ctx.fillStyle = "#1e3a8a";
-  ctx.fillRect(-6 + swing * 0.5, 4, 5, 11);
-  ctx.fillRect(1 - swing * 0.5, 4, 5, 11);
-  ctx.fillStyle = "#3e2723";
-  ctx.fillRect(-6 + swing * 0.5, 14, 6, 3);
-  ctx.fillRect(1 - swing * 0.5, 14, 6, 3);
+  ctx.fillStyle = "#3f5f8a";
+  ctx.fillRect(-6 + swing * 0.5, 4, 5, 9);
+  ctx.fillRect(1 - swing * 0.5, 4, 5, 9);
+  ctx.fillStyle = "#4e2c14";
+  for (const x of [-6 + swing * 0.5, 1 - swing * 0.5]) {
+    ctx.fillRect(x, 11, 5, 5);
+    ctx.fillRect(x, 15, 7, 2);
+    ctx.fillRect(x, 16, 2, 1.5);
+  }
 
   ctx.fillStyle = shirt;
   ctx.beginPath();
-  ctx.roundRect(-7, -7, 14, 13, 4);
+  ctx.roundRect(-7, -7, 14, 12, 4);
   ctx.fill();
-  ctx.fillStyle = "#5d4037";
-  ctx.fillRect(-7, 3, 14, 2);
-
-  circle(0, -13, 6.5, skin);
-  ctx.fillStyle = "#4e342e";
+  ctx.fillStyle = vest;
   ctx.beginPath();
-  ctx.arc(0, -14, 7, Math.PI, Math.PI * 2);
+  ctx.roundRect(-7, -7, 5, 11, [4, 0, 0, 2]);
+  ctx.roundRect(2, -7, 5, 11, [0, 4, 2, 0]);
   ctx.fill();
-  ctx.fillRect(-7, -14, 4, 5);
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(-7, 3, 14, 2.5);
+  ctx.fillStyle = "#ffca28";
+  ctx.fillRect(-1.5, 2.6, 3.5, 3.2);
+  ctx.fillStyle = leather;
+  ctx.fillRect(-9, 3, 3, 7);
+
+  circle(0, -12.5, 6, skin);
+  ctx.fillStyle = "#5d3a1a";
+  ctx.fillRect(-6, -14, 3, 5);
   ctx.fillStyle = "#222";
-  ctx.fillRect(2.5, -13, 2, 2);
+  ctx.fillRect(2.5, -13, 2, 1.8);
+  ctx.fillStyle = "rgba(60, 40, 20, 0.35)";
+  ctx.fillRect(0, -9.5, 5, 2.5);
+
+  ctx.fillStyle = "#d32f2f";
+  ctx.beginPath();
+  ctx.moveTo(-5, -7.5);
+  ctx.lineTo(5, -7.5);
+  ctx.lineTo(1.5, -2.5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#a0652d";
+  ctx.beginPath();
+  ctx.roundRect(-5.5, -24, 11, 8, [4, 4, 1, 1]);
+  ctx.fill();
+  ctx.fillStyle = "#7a4a1e";
+  ctx.fillRect(-1, -24, 2, 2.5);
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(-5.5, -18.5, 11, 1.8);
+  ctx.fillStyle = leather;
+  ctx.beginPath();
+  ctx.ellipse(0, -16.5, 12, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+  ctx.beginPath();
+  ctx.ellipse(0, -15.8, 10, 1.4, 0, 0, Math.PI);
+  ctx.fill();
 
   const localAim = facing === 1 ? p.aim : Math.PI - p.aim;
   ctx.save();
@@ -917,9 +955,12 @@ function drawMan(p) {
   ctx.fillRect(0, -2, 5, 4);
   ctx.fillStyle = skin;
   ctx.fillRect(5, -1.5, 5, 3);
-  ctx.fillStyle = "#263238";
-  ctx.fillRect(9, -2.5, 10, 4);
-  ctx.fillRect(9, 0.5, 3, 4);
+  ctx.fillStyle = "#6d4c41";
+  ctx.fillRect(8, 0, 3, 5);
+  ctx.fillStyle = "#424242";
+  ctx.fillRect(9, -2.5, 5, 4);
+  ctx.fillStyle = "#b0bec5";
+  ctx.fillRect(13, -1.8, 8, 2);
   ctx.restore();
 
   ctx.restore();
