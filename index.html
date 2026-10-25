@@ -65,12 +65,12 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
+<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span> &nbsp; Sound: <span id="sound">on</span> (M)</div>
 <div id="overlay">
   <h1>Zombie Maze</h1>
   <p>You are lost in an endless frontier town overrun by zombies. You shoot automatically at any zombie you can see.</p>
   <p>They shuffle in from beyond every corner. Move with WASD or the arrow keys.</p>
-  <p>Grab the gold sheriff stars to fire more bullets at once.</p>
+  <p>Grab the gold sheriff stars to fire more bullets at once. Press M to turn the sound on or off.</p>
   <button id="start">Play</button>
 </div>
 
@@ -80,6 +80,7 @@ const ctx = canvas.getContext("2d");
 const scoreEl = document.getElementById("score");
 const livesEl = document.getElementById("lives");
 const shotsEl = document.getElementById("shots");
+const soundEl = document.getElementById("sound");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("start");
 
@@ -105,8 +106,71 @@ window.addEventListener("resize", resize);
 resize();
 
 const keys = {};
-window.addEventListener("keydown", e => (keys[e.key.toLowerCase()] = true));
+window.addEventListener("keydown", e => {
+  const key = e.key.toLowerCase();
+  if (key === "m" && !e.repeat) toggleSound();
+  keys[key] = true;
+});
 window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
+
+// ---------- Sound ----------
+// Gunshots are synthesized with the Web Audio API: a filtered noise crack plus a
+// short falling-pitch thump. Browsers only allow audio to start after a user
+// gesture, so the context is created when Play is clicked.
+
+let audio = null, master = null, noiseBuffer = null, muted = false;
+
+function initAudio() {
+  if (!audio) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    audio = new AudioCtx();
+    master = audio.createGain();
+    master.gain.value = 0.35;
+    master.connect(audio.destination);
+    noiseBuffer = audio.createBuffer(1, Math.floor(audio.sampleRate * 0.3), audio.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  }
+  if (audio.state === "suspended") audio.resume();
+}
+
+function toggleSound() {
+  muted = !muted;
+  soundEl.textContent = muted ? "off" : "on";
+}
+
+function playShot(volley) {
+  if (!audio || muted || audio.state !== "running") return;
+  const t = audio.currentTime;
+  const loudness = Math.min(1.6, 1 + (volley - 1) * 0.1);
+
+  const crack = audio.createBufferSource();
+  crack.buffer = noiseBuffer;
+  crack.playbackRate.value = 0.85 + Math.random() * 0.3;
+  const band = audio.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 1600 + Math.random() * 800;
+  band.Q.value = 0.7;
+  const crackGain = audio.createGain();
+  crackGain.gain.setValueAtTime(0.0001, t);
+  crackGain.gain.exponentialRampToValueAtTime(0.6 * loudness, t + 0.003);
+  crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+  crack.connect(band).connect(crackGain).connect(master);
+  crack.start(t);
+  crack.stop(t + 0.16);
+
+  const thump = audio.createOscillator();
+  thump.type = "triangle";
+  thump.frequency.setValueAtTime(170 + Math.random() * 30, t);
+  thump.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+  const thumpGain = audio.createGain();
+  thumpGain.gain.setValueAtTime(0.5 * loudness, t);
+  thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  thump.connect(thumpGain).connect(master);
+  thump.start(t);
+  thump.stop(t + 0.13);
+}
 
 // ---------- Endless maze ----------
 // The world is split into CHUNK x CHUNK blocks of cells. Each chunk is a seeded
@@ -726,6 +790,7 @@ function shoot() {
       r: 5,
     });
   }
+  playShot(shots);
 }
 
 function explode(x, y, color, count = 14) {
@@ -1172,6 +1237,7 @@ function loop(time) {
 }
 
 function start() {
+  initAudio();
   reset();
   overlay.classList.add("hidden");
   running = true;
