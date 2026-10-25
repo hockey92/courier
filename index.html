@@ -52,8 +52,8 @@
 <div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
   <h1>Ball Defender</h1>
-  <p>Your ball shoots automatically.</p>
-  <p>Move with WASD or the arrow keys and survive as long as you can.</p>
+  <p>You are trapped in a labyrinth. Your ball shoots automatically at any enemy it can see.</p>
+  <p>Enemies pour out of the four corners. Move with WASD or the arrow keys.</p>
   <p>Grab the purple bonuses to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
@@ -67,10 +67,23 @@ const shotsEl = document.getElementById("shots");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("start");
 
+const CELL = 64;
+const WALL = 8;
+const HUD_HEIGHT = 48;
+const LOOP_CHANCE = 0.15;
+const MAX_ENEMIES = 120;
+const MAX_SHOTS = 7;
+const BONUS_DURATION = 10;
+const BONUS_LIFETIME = 8;
+
 let W, H;
+let cols, rows, ox = 0, oy = 0, hWalls, vWalls, walls = [], mazeCanvas, corners;
+let dist, distCell = "";
+
 function resize() {
   W = canvas.width = window.innerWidth;
   H = canvas.height = window.innerHeight;
+  if (cols) layout();
 }
 window.addEventListener("resize", resize);
 resize();
@@ -79,16 +92,175 @@ const keys = {};
 window.addEventListener("keydown", e => (keys[e.key.toLowerCase()] = true));
 window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
 
-const MAX_SHOTS = 7;
-const BONUS_DURATION = 10;
-const BONUS_LIFETIME = 8;
+function layout() {
+  ox = Math.floor((W - cols * CELL) / 2);
+  oy = Math.floor(HUD_HEIGHT + (H - HUD_HEIGHT - rows * CELL) / 2);
+}
+
+function buildMaze() {
+  cols = Math.max(5, Math.floor((W - 40) / CELL));
+  rows = Math.max(5, Math.floor((H - HUD_HEIGHT - 20) / CELL));
+  hWalls = Array.from({ length: rows + 1 }, () => Array(cols).fill(true));
+  vWalls = Array.from({ length: rows }, () => Array(cols + 1).fill(true));
+
+  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const stack = [[0, 0]];
+  visited[0][0] = true;
+  while (stack.length) {
+    const [c, r] = stack[stack.length - 1];
+    const options = [];
+    if (r > 0 && !visited[r - 1][c]) options.push([c, r - 1]);
+    if (r < rows - 1 && !visited[r + 1][c]) options.push([c, r + 1]);
+    if (c > 0 && !visited[r][c - 1]) options.push([c - 1, r]);
+    if (c < cols - 1 && !visited[r][c + 1]) options.push([c + 1, r]);
+    if (!options.length) { stack.pop(); continue; }
+    const [nc, nr] = options[Math.floor(Math.random() * options.length)];
+    if (nr < r) hWalls[r][c] = false;
+    else if (nr > r) hWalls[nr][c] = false;
+    else if (nc < c) vWalls[r][c] = false;
+    else vWalls[r][nc] = false;
+    visited[nr][nc] = true;
+    stack.push([nc, nr]);
+  }
+
+  for (let r = 1; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (hWalls[r][c] && Math.random() < LOOP_CHANCE) hWalls[r][c] = false;
+  for (let r = 0; r < rows; r++)
+    for (let c = 1; c < cols; c++)
+      if (vWalls[r][c] && Math.random() < LOOP_CHANCE) vWalls[r][c] = false;
+
+  walls = [];
+  for (let r = 0; r <= rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (hWalls[r][c]) walls.push({ x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: CELL + WALL, h: WALL });
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c <= cols; c++)
+      if (vWalls[r][c]) walls.push({ x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: WALL, h: CELL + WALL });
+
+  corners = [
+    { c: 0, r: 0 },
+    { c: cols - 1, r: 0 },
+    { c: 0, r: rows - 1 },
+    { c: cols - 1, r: rows - 1 },
+  ];
+
+  mazeCanvas = document.createElement("canvas");
+  mazeCanvas.width = cols * CELL + 40;
+  mazeCanvas.height = rows * CELL + 40;
+  const m = mazeCanvas.getContext("2d");
+  m.translate(20, 20);
+  m.shadowColor = "#5c6bc0";
+  m.shadowBlur = 12;
+  m.fillStyle = "#3949ab";
+  for (const w of walls) m.fillRect(w.x, w.y, w.w, w.h);
+
+  distCell = "";
+  layout();
+}
+
+function cellOf(x, y) {
+  return {
+    c: Math.max(0, Math.min(cols - 1, Math.floor(x / CELL))),
+    r: Math.max(0, Math.min(rows - 1, Math.floor(y / CELL))),
+  };
+}
+
+function cellCenter(c, r) {
+  return { x: (c + 0.5) * CELL, y: (r + 0.5) * CELL };
+}
+
+function openNeighbors(c, r) {
+  const n = [];
+  if (r > 0 && !hWalls[r][c]) n.push({ c, r: r - 1 });
+  if (r < rows - 1 && !hWalls[r + 1][c]) n.push({ c, r: r + 1 });
+  if (c > 0 && !vWalls[r][c]) n.push({ c: c - 1, r });
+  if (c < cols - 1 && !vWalls[r][c + 1]) n.push({ c: c + 1, r });
+  return n;
+}
+
+function updateDistances() {
+  const { c, r } = cellOf(player.x, player.y);
+  const key = c + "," + r;
+  if (key === distCell) return;
+  distCell = key;
+  dist = Array.from({ length: rows }, () => Array(cols).fill(Infinity));
+  dist[r][c] = 0;
+  const queue = [{ c, r }];
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i];
+    for (const n of openNeighbors(cur.c, cur.r)) {
+      if (dist[n.r][n.c] === Infinity) {
+        dist[n.r][n.c] = dist[cur.r][cur.c] + 1;
+        queue.push(n);
+      }
+    }
+  }
+}
+
+function pushOutOfWalls(o) {
+  for (const w of walls) {
+    if (o.x + o.r < w.x || o.x - o.r > w.x + w.w || o.y + o.r < w.y || o.y - o.r > w.y + w.h) continue;
+    const nx = Math.max(w.x, Math.min(o.x, w.x + w.w));
+    const ny = Math.max(w.y, Math.min(o.y, w.y + w.h));
+    const dx = o.x - nx, dy = o.y - ny;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= o.r * o.r) continue;
+    if (d2 > 0) {
+      const d = Math.sqrt(d2);
+      const push = (o.r - d) / d;
+      o.x += dx * push;
+      o.y += dy * push;
+    } else {
+      const left = o.x - w.x, right = w.x + w.w - o.x;
+      const top = o.y - w.y, bottom = w.y + w.h - o.y;
+      const min = Math.min(left, right, top, bottom);
+      if (min === left) o.x = w.x - o.r;
+      else if (min === right) o.x = w.x + w.w + o.r;
+      else if (min === top) o.y = w.y - o.r;
+      else o.y = w.y + w.h + o.r;
+    }
+  }
+}
+
+function hitsWall(x, y, r) {
+  for (const w of walls) {
+    const nx = Math.max(w.x, Math.min(x, w.x + w.w));
+    const ny = Math.max(w.y, Math.min(y, w.y + w.h));
+    if ((x - nx) ** 2 + (y - ny) ** 2 < r * r) return true;
+  }
+  return false;
+}
+
+function segmentHitsRect(x1, y1, x2, y2, w) {
+  let t0 = 0, t1 = 1;
+  const axes = [[x1, x2 - x1, w.x, w.x + w.w], [y1, y2 - y1, w.y, w.y + w.h]];
+  for (const [p, d, min, max] of axes) {
+    if (Math.abs(d) < 1e-9) {
+      if (p < min || p > max) return false;
+    } else {
+      let ta = (min - p) / d, tb = (max - p) / d;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
+}
+
+function lineOfSight(x1, y1, x2, y2) {
+  for (const w of walls) if (segmentHitsRect(x1, y1, x2, y2, w)) return false;
+  return true;
+}
 
 let player, bullets, enemies, particles, bonuses, score, lives, elapsed;
 let shootTimer, spawnTimer, invulnerable, running = false, lastTime = 0;
 let shots, shotsTimer, bonusTimer;
 
 function reset() {
-  player = { x: W / 2, y: H / 2, r: 18, speed: 260 };
+  const start = cellCenter(Math.floor(cols / 2), Math.floor(rows / 2));
+  player = { x: start.x, y: start.y, r: 16, speed: 220 };
   bullets = [];
   enemies = [];
   particles = [];
@@ -97,7 +269,7 @@ function reset() {
   lives = 3;
   elapsed = 0;
   shootTimer = 0;
-  spawnTimer = 0;
+  spawnTimer = 1;
   invulnerable = 0;
   shots = 1;
   shotsTimer = 0;
@@ -112,42 +284,44 @@ function updateShotsHud() {
 }
 
 function spawnBonus() {
-  const pad = 60;
-  bonuses.push({
-    x: pad + Math.random() * (W - pad * 2),
-    y: pad + Math.random() * (H - pad * 2),
-    r: 14,
-    life: BONUS_LIFETIME,
-  });
+  const pc = cellOf(player.x, player.y);
+  let c, r;
+  do {
+    c = Math.floor(Math.random() * cols);
+    r = Math.floor(Math.random() * rows);
+  } while (c === pc.c && r === pc.r);
+  const p = cellCenter(c, r);
+  bonuses.push({ x: p.x, y: p.y, r: 12, life: BONUS_LIFETIME });
 }
 
 function spawnEnemy() {
-  const side = Math.floor(Math.random() * 4);
-  const margin = 30;
-  let x, y;
-  if (side === 0) { x = Math.random() * W; y = -margin; }
-  else if (side === 1) { x = W + margin; y = Math.random() * H; }
-  else if (side === 2) { x = Math.random() * W; y = H + margin; }
-  else { x = -margin; y = Math.random() * H; }
-
-  const r = 10 + Math.random() * 14;
-  const hp = r > 18 ? 2 : 1;
-  const speed = 60 + Math.random() * 40 + elapsed * 2;
+  if (enemies.length >= MAX_ENEMIES) return;
+  const corner = corners[Math.floor(Math.random() * corners.length)];
+  const p = cellCenter(corner.c, corner.r);
+  const r = 9 + Math.random() * 7;
+  const hp = r > 13 ? 2 : 1;
+  const speed = 45 + Math.random() * 30 + elapsed * 1.2;
   const hue = Math.floor(Math.random() * 60);
-  enemies.push({ x, y, r, hp, speed, color: `hsl(${hue}, 85%, 60%)` });
+  enemies.push({
+    x: p.x + (Math.random() - 0.5) * 10,
+    y: p.y + (Math.random() - 0.5) * 10,
+    r, hp, speed,
+    color: `hsl(${hue}, 85%, 60%)`,
+  });
 }
 
-function nearestEnemy() {
-  let best = null, bestDist = Infinity;
-  for (const e of enemies) {
-    const d = (e.x - player.x) ** 2 + (e.y - player.y) ** 2;
-    if (d < bestDist) { bestDist = d; best = e; }
+function nearestVisibleEnemy() {
+  const sorted = enemies
+    .map(e => ({ e, d: (e.x - player.x) ** 2 + (e.y - player.y) ** 2 }))
+    .sort((a, b) => a.d - b.d);
+  for (const { e } of sorted) {
+    if (lineOfSight(player.x, player.y, e.x, e.y)) return e;
   }
-  return best;
+  return null;
 }
 
 function shoot() {
-  const target = nearestEnemy();
+  const target = nearestVisibleEnemy();
   if (!target) return;
   const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
   const speed = 600;
@@ -172,6 +346,44 @@ function explode(x, y, color, count = 14) {
   }
 }
 
+function moveEnemy(e, dt) {
+  const { c, r } = cellOf(e.x, e.y);
+  let tx = player.x, ty = player.y;
+  if (dist[r][c] > 0 && dist[r][c] !== Infinity) {
+    const next = openNeighbors(c, r).find(n => dist[n.r][n.c] < dist[r][c]);
+    if (next) {
+      const here = cellCenter(c, r);
+      const there = cellCenter(next.c, next.r);
+      if (next.r === r) { tx = there.x; ty = here.y; }
+      else { tx = here.x; ty = there.y; }
+    }
+  }
+  const dx = tx - e.x, dy = ty - e.y;
+  const d = Math.hypot(dx, dy);
+  if (d > 0) {
+    const step = Math.min(d, e.speed * dt);
+    e.x += (dx / d) * step;
+    e.y += (dy / d) * step;
+  }
+}
+
+function separateEnemies() {
+  for (let i = 0; i < enemies.length; i++) {
+    const a = enemies[i];
+    for (let j = i + 1; j < enemies.length; j++) {
+      const b = enemies[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const min = a.r + b.r;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= min * min || d2 === 0) continue;
+      const d = Math.sqrt(d2);
+      const push = (min - d) / d / 2;
+      a.x -= dx * push; a.y -= dy * push;
+      b.x += dx * push; b.y += dy * push;
+    }
+  }
+}
+
 function update(dt) {
   elapsed += dt;
 
@@ -184,21 +396,21 @@ function update(dt) {
     const len = Math.hypot(dx, dy);
     player.x += (dx / len) * player.speed * dt;
     player.y += (dy / len) * player.speed * dt;
-    player.x = Math.max(player.r, Math.min(W - player.r, player.x));
-    player.y = Math.max(player.r, Math.min(H - player.r, player.y));
+    pushOutOfWalls(player);
   }
+  updateDistances();
 
-  const fireInterval = Math.max(0.1, 0.3 - elapsed * 0.002);
+  const fireInterval = Math.max(0.08, 0.2 - elapsed * 0.002);
   shootTimer -= dt;
   if (shootTimer <= 0) {
     shoot();
     shootTimer = fireInterval;
   }
 
-  const spawnInterval = Math.max(0.12, 0.5 - elapsed * 0.008);
+  const spawnInterval = Math.max(0.2, 1.1 - elapsed * 0.012);
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
-    const count = 1 + Math.floor(elapsed / 25);
+    const count = 1 + Math.floor(elapsed / 40);
     for (let i = 0; i < count; i++) spawnEnemy();
     spawnTimer = spawnInterval;
   }
@@ -232,14 +444,15 @@ function update(dt) {
   for (const b of bullets) {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
+    if (hitsWall(b.x, b.y, b.r)) {
+      b.dead = true;
+      explode(b.x, b.y, "#fff59d", 3);
+    }
   }
-  bullets = bullets.filter(b => b.x > -20 && b.x < W + 20 && b.y > -20 && b.y < H + 20);
 
-  for (const e of enemies) {
-    const a = Math.atan2(player.y - e.y, player.x - e.x);
-    e.x += Math.cos(a) * e.speed * dt;
-    e.y += Math.sin(a) * e.speed * dt;
-  }
+  for (const e of enemies) moveEnemy(e, dt);
+  separateEnemies();
+  for (const e of enemies) pushOutOfWalls(e);
 
   for (const e of enemies) {
     for (const b of bullets) {
@@ -249,7 +462,7 @@ function update(dt) {
         e.hp--;
         if (e.hp <= 0) {
           e.dead = true;
-          score += e.r > 18 ? 2 : 1;
+          score += e.r > 13 ? 2 : 1;
           scoreEl.textContent = score;
           explode(e.x, e.y, e.color);
           break;
@@ -295,8 +508,22 @@ function circle(x, y, r, color) {
 }
 
 function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "rgba(13, 15, 26, 0.35)";
   ctx.fillRect(0, 0, W, H);
+  ctx.translate(ox, oy);
+
+  ctx.drawImage(mazeCanvas, -20, -20);
+
+  const glow = 0.4 + Math.sin(elapsed * 4) * 0.2;
+  for (const corner of corners) {
+    const p = cellCenter(corner.c, corner.r);
+    ctx.strokeStyle = `rgba(255, 82, 82, ${glow})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, CELL * 0.32, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   for (const p of particles) {
     ctx.globalAlpha = Math.max(0, p.life / 0.6);
@@ -356,7 +583,9 @@ function loop(time) {
 }
 
 function start() {
+  buildMaze();
   reset();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#0d0f1a";
   ctx.fillRect(0, 0, W, H);
   overlay.classList.add("hidden");
