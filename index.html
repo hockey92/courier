@@ -122,6 +122,7 @@ window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
 
 const MASTER_VOLUME = 0.35;
 const MUSIC_VOLUME = 0.5;
+const SHOT_VOLUME = 0.4;
 
 let audio = null, master = null, noiseBuffer = null, muted = false;
 let musicGain = null, echoIn = null, musicOn = true;
@@ -171,7 +172,7 @@ function toggleMusic() {
 function playShot(volley) {
   if (!audio || muted || audio.state !== "running") return;
   const t = audio.currentTime;
-  const loudness = Math.min(1.6, 1 + (volley - 1) * 0.1);
+  const loudness = SHOT_VOLUME * Math.min(1.6, 1 + (volley - 1) * 0.1);
 
   const crack = audio.createBufferSource();
   crack.buffer = noiseBuffer;
