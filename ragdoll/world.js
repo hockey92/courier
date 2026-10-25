@@ -1,7 +1,7 @@
 // The endless street: chunk data (obstacles, collision boxes, house rows), building chunks,
 // the distant skyline, and keeping chunks loaded around the view.
 import * as THREE from 'three';
-import { BODY_R, CHUNK, FAR_CHUNK, Z_MAX, Z_MIN, seeded } from './config.js';
+import { BLOCK, BODY_R, CHUNK, FAR_CHUNK, Z_MAX, Z_MIN, seeded, streetNumber } from './config.js';
 import { showFrontRow } from './state.js';
 import { scene } from './scene.js';
 import { addBox, addBuilding, crateMat, cylGeo, glowMat, mat } from './materials.js';
@@ -62,9 +62,12 @@ export function getChunkData(i) {
   const covered = boxes.some(b => mx > b.x0 - 0.9 && mx < b.x1 + 0.9 && mz > b.z0 - 0.9 && mz < b.z1 + 0.9);
   const manhole = { x: mx, z: mz, open: (i === 0 || mrnd() < 0.4) && !covered };
   if (manhole.open) boxes.push({ x0: mx - 0.95, x1: mx - 0.55, z0: mz - 0.5, z1: mz - 0.1, top: 0.5 }); // traffic cone
+  // the first chunk of every block after the first starts with a crossing: crosswalk, signal and street sign
+  const crossing = i > 0 && i % (BLOCK / CHUNK) === 0 ? i / (BLOCK / CHUNK) : 0;
+  if (crossing) boxes.push({ x0: start + 0.09, x1: start + 0.21, z0: -2.61, z1: -2.49, top: 3.2 }); // signal pole
   const buildings = makeRow(rnd, start);
   const frontRow = makeRow(seeded(i * 4441 + 7), start);
-  const data = { lampX, obstacles, boxes, buildings, frontRow, homeless, manhole };
+  const data = { lampX, obstacles, boxes, buildings, frontRow, homeless, manhole, crossing };
   chunkData.set(i, data);
   return data;
 }
@@ -172,6 +175,43 @@ export function buildManhole(g, { x, z, open }) {
   addCyl(g, 0.075, 0.1, 0.08, white, cx, 0.3, cz);
 }
 
+// every traffic signal shares these, so they all change together: red while the block's crew is still
+// about, green once you've cleared it (blocks.js)
+export const signalMats = {
+  red: new THREE.MeshStandardMaterial({ color: 0x3a1010, emissive: 0xff2a1a, emissiveIntensity: 2, flatShading: true }),
+  green: new THREE.MeshStandardMaterial({ color: 0x103a1c, emissive: 0x2aff7a, emissiveIntensity: 0, flatShading: true }),
+};
+
+// crossing n sits at x = n * BLOCK, at the start of the chunk
+export function buildCrossing(g, disposables, x, n) {
+  const white = mat('#e9e6dc');
+  for (let z = -1.85; z < 3.2; z += 0.75) addBox(g, 2.1, 0.02, 0.42, white, x + 1.65, 0.007, z, false); // crosswalk
+  addBox(g, 0.22, 0.02, 5.4, white, x + 0.35, 0.007, 0.6, false);                                      // stop line
+  const px = x + 0.15, pz = -2.55, pole = mat('#2c3a30');
+  addBox(g, 0.12, 3.2, 0.12, pole, px, 1.6, pz);
+  // signal head on top, lit towards the behind-view camera (-x) and the side-view camera (+z)
+  addBox(g, 0.3, 0.84, 0.3, mat('#d6a51c'), px, 3.62, pz);
+  const amber = mat('#3a2a08');
+  for (const [m, y] of [[signalMats.red, 3.88], [amber, 3.62], [signalMats.green, 3.36]]) {
+    addBox(g, 0.02, 0.19, 0.19, m, px - 0.16, y, pz, false);
+    addBox(g, 0.19, 0.19, 0.02, m, px, y, pz + 0.16, false);
+  }
+  // green street-name blades, one facing each camera
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1d6b3c'; ctx.fillRect(0, 0, 256, 64);
+  ctx.strokeStyle = '#f4f4f4'; ctx.lineWidth = 4; ctx.strokeRect(5, 5, 246, 54);
+  ctx.fillStyle = '#f4f4f4'; ctx.font = 'bold 36px system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(`W ${streetNumber(n)} ST`, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sign = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.3, flatShading: true });
+  disposables.push(tex, sign);
+  addBox(g, 1.1, 0.26, 0.03, sign, px + 0.5, 2.82, pz, false);
+  addBox(g, 0.03, 0.26, 1.1, sign, px, 3.06, pz + 0.5, false);
+}
+
 export const liveChunks = new Map();
 export function buildChunk(i) {
   const d = getChunkData(i);
@@ -211,6 +251,7 @@ export function buildChunk(i) {
 
   for (const o of d.obstacles) buildObstacle(g, o);
   buildManhole(g, d.manhole);
+  if (d.crossing) buildCrossing(g, disposables, start, d.crossing);
   const chillers = d.homeless ? [buildHomeless(g, disposables, d.homeless)] : [];
   scene.add(g);
   liveChunks.set(i, { g, disposables, chillers, front });

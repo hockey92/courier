@@ -8,17 +8,25 @@ Read this before changing the game; update it when you add a system or change a 
 
 ## 1. What the game is
 
-A low-poly 3D brawler set on a New York street at dusk. You play a ragdoll who runs, jumps,
-flips, punches and kicks his way through endless gangsters, past brownstones, rats, litter and a guy
-chilling on his cardboard. Getting hit costs hearts; losing them all means **Busted!** and the survival
-timer resets.
+A low-poly 3D brawler set on a New York street at dusk. You play a ragdoll who fights his way uptown
+one block at a time, past brownstones, rats, litter and a guy chilling on his cardboard. Each block has
+a crew of gangsters; knock them all out and the light at the crossing turns green so you can cross to
+the next. Getting hit costs hearts; losing them all means **Busted!** and the run starts again from
+the first block.
 
 ### What you can do
-- **Fight as the man.** Run down an endless street, jump (again in mid-air to flip), punch (**F**) and
-  kick (**G**, twice as hard). Knock gangsters out with punches, kicks or a stomp on the head. Up to
-  three come at you at once and they fight back; you have 6 hearts.
-- **Chase a score.** The HUD shows how long you've survived, your best time (saved), knockouts and
-  the farthest you've got along the street.
+- **Fight as the man.** Run, jump (again in mid-air to flip), punch (**F**) and kick (**G**, twice as
+  hard). Knock gangsters out with punches, kicks or a stomp on the head. They fight back; you have 6
+  hearts, and clearing a block gives two back.
+- **Clear the street block by block.** Blocks are 48 m long and end at a crossing named after the
+  next street (W 11 St, W 12 St…). The light stays red, and you can't cross, until the block's crew
+  is all down. Crews get bigger, come at you more at once and swing more often the further you get.
+- **Learn the gangsters.** Thugs from block 1, Runners from block 2 (one hit drops them, but they
+  steal a heart and run), Bruisers from 3 (shrug off punches), Bottle Throwers from 4 (hang back and
+  lob bottles), and **Big Tony** every fifth block (a boss with a health bar and a charge that leaves
+  him dizzy if he runs into something).
+- **Chase a score.** The HUD shows the block, the street you're heading for, the crew left, hearts,
+  your best number of blocks cleared (saved), knockouts and the run time.
 - **Change your look.** **C** or the ◀ ▶ buttons cycle the skins: New Yorker, Mamdani, Construction
   Worker, Classic Ragdoll (saved).
 - **Pick a camera.** **V** or the camera button switches between the over-the-shoulder behind view and
@@ -64,25 +72,27 @@ one-line description and explicit imports. Files are listed from the bottom of t
 
 | File | What's in it | Main exports |
 |---|---|---|
-| `config.js` | units, body sizes, tuning constants, maths helpers | `S`, `GRAVITY`, `Z_MIN/Z_MAX`, `CHUNK`, `seeded`, `lerp`, `rot` |
-| `state.js` | shared state several files read **and change** (see below) | `state`, `showFrontRow` |
+| `config.js` | units, body sizes, tuning constants, block size and street names, maths helpers | `S`, `GRAVITY`, `Z_MIN/Z_MAX`, `CHUNK`, `BLOCK`, `streetName`, `seeded`, `lerp`, `rot` |
+| `state.js` | shared state several files read **and change** (see below), and the banner | `state`, `say`, `showFrontRow` |
 | `scene.js` | renderer, scene, sky gradient, fog, camera, lights, stars | `renderer`, `scene`, `camera`, `keyLight`, `stars` |
 | `materials.js` | cached boxes/colours, painted textures, apartment facades, crate/glow, box-between-points helpers | `boxGeo`, `mat`, `addBox`, `canvasTex`, `addBuilding`, `cylGeo`, `orient`, `limb`, `bendPoint` |
 | `brownstones.js` | brownstone facades, stoops, railings, cornices, iron fences | `FACADE_Z`, `addBrownstone`, `fence` |
 | `homeless.js` | the guy chilling on his cardboard | `buildHomeless` |
-| `world.js` | chunk data (obstacles, collision boxes, house rows, manholes), chunk building, skyline, chunk loading | `getChunkData`, `boxesNear`, `floorAt`, `openManholeAt`, `liveChunks`, `syncChunks` |
+| `world.js` | chunk data (obstacles, collision boxes, house rows, manholes, crossings), chunk building, traffic signals, skyline, chunk loading | `getChunkData`, `boxesNear`, `floorAt`, `openManholeAt`, `signalMats`, `liveChunks`, `syncChunks` |
 | `music.js` | "Broadway Boogie" and sound effects, all synthesised | `music` |
 | `effects.js` | dust puffs | `dust`, `updateDust` |
 | `ragdoll.js` | skeleton and the `Ragdoll` class: controller, attacks, pose, physics, meshes | `Ragdoll`, `NAMES` |
-| `looks.js` | gangster suits and hero skins | `GANGSTER_LOOK`, `SKINS`, `SKIN_ORDER` |
+| `looks.js` | a look per kind of gangster, and hero skins | `GANGSTER_LOOKS`, `SKINS`, `SKIN_ORDER` |
 | `actors.js` | the hero and the gangster list | `man`, `gangsters` |
+| `bottles.js` | the bottles throwers lob: a pool on an arc, smashing on the man, boxes or the ground | `throwBottle`, `updateBottles`, `renderBottles`, `clearBottles` |
 | `turtles.js` | the four ninja turtles: box bodies, hand-made poses (idle activities, cheering) | `buildTurtle`, `applyPose`, `idlePose`, `cheerPose` |
 | `sewer.js` | the sewer and the turtles' lair: geometry, collision, dropping in / climbing out, the turtles' reactions | `sewer`, `SEWER_Y`, `dropIn`, `stepTransition`, `leaveSewer`, `updateSewer`, `renderSewer` |
 | `view.js` | the camera rig: side, behind and rat's-eye views, key light following | `camPos`, `updateCamera` |
 | `rats.js` | AI rats and the rat you drive | `rats`, `updateRats` |
 | `garbage.js` | wind and instanced litter | `updateGarbage`, `renderGarbage` |
-| `combat.js` | gangster spawning and brain, landing hits, stomps, getting busted | `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `behind` |
-| `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
+| `combat.js` | kinds of gangster, spawning, their brains, Big Tony's charge, landing hits, stomps, clearing away the knocked out, getting busted | `GANG_TYPES`, `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `hurtMan`, `updateGangs`, `renderGangs`, `behind` |
+| `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
+| `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wavePlan`, `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
 | `input.js` | held keys, one-shot actions, hotkeys | `keys`, `queued` |
 | `main.js` | `update()` (the fixed-step tick), `render()`, the loop, `window.game` | — |
 
@@ -91,8 +101,9 @@ one-line description and explicit imports. Files are listed from the bottom of t
   `const`/`let`/`function`/`class` is exported so other files can pick it up.
 - **Shared mutable state goes in `state`.** An imported binding can't be reassigned by the importer, so
   values that several files *change* live on the `state` object: `camMode`, `camYaw`, `camX`, `camZ`,
-  `playingRat`, `ratPlayer`, `survived`, `best`, `knockouts`, `farthest`, `spawnTimer`, `shake`,
-  `caughtTimer`, `fade` (the full-screen black-out, drawn by `updateHud`). Write `state.shake = 0.15`, never a separate `let shake`. One-shot key presses are
+  `playingRat`, `ratPlayer`, `block`, `cleared`, `crewLeft`, `gateOpen`, `bestBlocks`, `survived`,
+  `knockouts`, `shake`, `caughtTimer`, `banner` (set it with `say(text, sub, frames)`), `fade` (the
+  full-screen black-out, drawn by `updateHud`). Write `state.shake = 0.15`, never a separate `let shake`. One-shot key presses are
   the same idea: `queued.jump/punch/kick` in `input.js`. A `let` that only its own file changes stays
   in that file (`dustIdx`, `windT`, `squeakCooldown`).
 - **No import cycles.** Lower files never import higher ones; if a low-level file needs something from
@@ -165,10 +176,10 @@ one-line description and explicit imports. Files are listed from the bottom of t
   constant only when used in more than one place (`FACADE_Z`, `KICK_WINDUP`, `RAT_COUNT`).
 
 ### Persistence and debugging
-- `localStorage` keys: `ragdollBestTime`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
+- `localStorage` keys: `ragdollBestBlocks`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
 - `window.game` exposes `man, gangsters, update, render, keys, boxesNear, jump(), punch(), kick(),
-  music, rats, setSkin, setPlayingRat, sewer, paused`. Add new systems here so they can be driven from the
-  console.
+  music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles, paused`.
+  Add new systems here so they can be driven from the console.
 
 ## 5. World
 
@@ -199,6 +210,16 @@ one-line description and explicit imports. Files are listed from the bottom of t
   aside, a traffic cone with a collision box). Chunk 0 always has an open one at x = 3.5, z = -0.6, just
   ahead of where Pizza Rat appears. A manhole within 0.9 m of an obstacle box always stays closed.
 - `openManholeAt(x, z)` is what the rat you play checks while it's on the ground; nothing else falls in.
+
+### Crossings
+- `BLOCK = 48` m (three chunks). Crossing `n` is at `x = n * BLOCK`, in the first chunk of the block
+  (`chunkData.crossing = n`, built by `buildCrossing`): a zebra crosswalk and stop line, a signal pole
+  on the back sidewalk (`x + 0.15, z = -2.55`, with a collision box), a yellow signal head lit on its
+  -x face (behind view) and +z face (side view), and two green street-name blades ("W 11 ST").
+- Block `n` ends at crossing `n`, named `streetName(n)` (`FIRST_STREET = 11`). The crossing adds no
+  random numbers, so layouts are unchanged.
+- Every signal shares `signalMats.red` / `signalMats.green`; `setSignal(go)` in `blocks.js` swaps their
+  `emissiveIntensity`, so all the lights change together (the ones behind you don't matter).
 
 ### Buildings
 - `makeRow(rnd, start)` fills a chunk with ~75% brownstones (5.4–6.6 m wide, ~7.6 m tall) and
@@ -243,30 +264,75 @@ Three layers, kept separate on purpose:
 
 ### Taking hits
 - `stagger(dx, dz, power)`: knockback, a head/neck snap (by moving the points' previous positions),
-  a lean back in `pose()`, and `stun = 15 + 10 * power` frames of no input.
-- `knockOut(dx, dz, frames, power)`: stiffness to 0 so the body goes limp, plus an impulse. When
-  `knocked` counts down, `getUp()` restores control, stiffness ramps back and `hp` refills.
+  a lean back in `pose()`, and `stun = 15 + 10 * power` frames of no input. `power` is divided by
+  `mass`, so heavy gangsters are knocked about less.
+- `knockOut(dx, dz, frames, power)`: stiffness to 0 so the body goes limp, plus an impulse (divided
+  by `√mass`). When `knocked` counts down, `getUp()` restores control, stiffness ramps back and `hp`
+  refills. Gangsters and the busted man are knocked out for `1e9` frames, so they never get up on
+  their own.
 - Invulnerability `invuln` makes the body blink: 30 frames after a hit, 90 after getting up.
+- Every hit on the man goes through `hurtMan(damage, power, nx, nz)` (blows, bottles, the charge);
+  every hit on a gangster through `hurtGangster`, and knockouts through `downGangster`, which counts the
+  KO, gives back a stolen heart and sets `leaveT = 170`. `updateGangs` blinks him for the last 60 frames
+  and then removes him from the scene and from `gangsters`.
+
+### Kinds of gangster (`GANG_TYPES` in `combat.js`, looks in `GANGSTER_LOOKS`)
+`spawnGangster(type, extraHp, aggro)` builds a `Ragdoll` from the kind's numbers; `g.type` and `g.kind`
+say what he is. `mass` and `bulk` (mesh width, via `scale` on each part) come from the kind.
+
+| Kind | HP | Speed | Wind-ups (punch/kick) | Damage (punch/kick) | What's special |
+|---|---|---|---|---|---|
+| Thug | 3 | 4.8 S | 20 / 16 | 1 / 2 | the regular; 40% kicks |
+| Runner | 1 | 6.6 S | 12 / 12 | 1 / 1 | backs off after every swing; landing a hit steals a heart (`stolen`, heart over his head) and he runs for 240 frames; knocking him out gives it back |
+| Bruiser | 6 | 3.6 S | 26 / 22 | 2 / 2 | `armored`: punches hurt but don't stagger him; `mass` 1.8, `bulk` 1.4 |
+| Bottle Thrower | 2 | 4.4 S | 18 / 16 | bottle 1 / kick 2 | stands off 4.5–7.5 m and throws every 90–160 frames (a punch that releases a bottle in `resolvePunches`); kicks if you get within 1.6 m |
+| Big Tony (boss) | 14 (+4 per visit) | 4.2 S | 28 / 22 | 2 / 3, charge 3 | `armored`, `mass` 2.6, `bulk` 1.65; the charge (below); a stomp does 3 damage instead of a knockout (45-frame cooldown) |
+
+**Big Tony's charge** (`chargeBrain`): when his cooldown is up and you're 3–11 m away, he paws the
+ground for `CHARGE_WINDUP = 50` frames lining up on you (dust at his heels), then runs straight at 2.6×
+speed for up to `CHARGE_TIME = 80` frames. Touching you costs 3 hearts. If he runs into an obstacle or
+the edge of the street he's `dizzy` (stun 130, stars round his head): punches and kicks hurt without
+waking him. A kick during the wind-up staggers him out of it.
 
 ### Current combat numbers
 
-| | Hero | Gangster |
+| | Hero | Gangsters |
 |---|---|---|
-| Health | 6 hearts | 3 |
-| Punch | wind-up 3, 1 damage, reach 1.0 m | wind-up 20, 1 damage |
-| Kick | wind-up 6 (`KICK_WINDUP`), 2 damage, reach 1.2 m, vertical reach 1.7 m (flying kicks) | wind-up 16, 2 damage |
-| Stomp | landing 1.25–1.95 m above a gangster's feet knocks him out | — |
-| Between attacks | — | 45–90 frames; picks next move ahead (40% kick) |
+| Health | 6 hearts, +2 for each block cleared | see the table above |
+| Punch | wind-up 3, 1 damage, reach 1.0 m | reach 1.0 m |
+| Kick | wind-up 6 (`KICK_WINDUP`), 2 damage, reach 1.2 m, vertical reach 1.7 m (flying kicks) | reach 1.2 m |
+| Stomp | landing 1.25–1.95 m above a gangster's feet knocks him out (Big Tony: 3 damage) | — |
+| Between attacks | — | `gap`–2×`gap` frames divided by `aggro` (1 + 0.05 per block); picks next move ahead |
 
-At most `MAX_GANGSTERS = 3`, one spawning every 480 frames. `behind()` spawns them just out of view:
-behind the hero in side view, ahead up the street in behind view. Stragglers over 34 m away are
-re-placed the same way.
+The man's knockback from a gangster's hit is multiplied by `√mass`. `behind()` spawns gangsters just
+out of view: behind the hero in side view, ahead up the street in behind view. Stragglers over 34 m away
+are re-placed the same way.
 
 ### Gangster AI (`gangsterBrain`)
-Returns the same inputs a player gives: `[ix, iz, jump, punch, kick]`. Approach to arm's length, spread
-out from each other, slide around tall obstacles, hop low ones, track the hero during the wind-up but
-commit once the blow is on its way (so sidestepping works), and stand around when he's down.
-New enemy behaviour should keep going through `control()` this way.
+Returns the same inputs a player gives: `[ix, iz, jump, punch, kick]`. Approach to arm's length (or
+back off while `flee > 0`, or stand off at range for throwers), spread out from each other, slide around
+tall obstacles, hop low ones, track the hero during the wind-up but commit once the blow is on its way
+(so sidestepping works), and stand around when he's down. Big Tony hands over to `chargeBrain` while
+`g.charge` is set. New enemy behaviour should keep going through `control()` this way.
+
+## 6b. Blocks and the run (`blocks.js`)
+
+- `wavePlan(n)` decides block `n`'s crew: `3 + n` gangsters (at most 12), drawn from the kinds
+  unlocked so far (runners from 2, bruisers from 3, throwers from 4), with up to `2 + n / 3` (at most 4)
+  standing at once. The kind a block introduces (`DEBUT`) is always in its first two, and its tip
+  (`TIPS`) shows in the "Block n" banner. Every fifth block is Big Tony plus one thug per visit, two at
+  once, and plays `music.alarm()`.
+- `updateBlocks()` spawns from `wave.queue` every 50–110 frames while fewer than `wave.max` are
+  standing, keeps `state.crewLeft` up to date, and calls `blockCleared()` when it hits 0: the light
+  goes green, `state.cleared` and the saved best go up, +2 hearts, `music.cheer()`. Walking 3 m past the
+  crossing starts the next block.
+- `holdAtGate()` runs straight after `man.control()`: while the light is red he can't get past
+  `gateX(block) - 0.35`, and bumping into it says "Don't walk!" (at most every 240 frames).
+- **Busted** (`getBusted`): the man stays down, `caughtTimer = 210` shows the "Busted!" banner, the
+  screen fades out over the last 40 frames and `resetRun()` puts him back at x = 0 with full hearts,
+  clears every gangster and bottle and starts block 1. `updateBlocks` runs after `updateSewer` because
+  the sewer also eases `state.fade`.
+- Nothing spawns and the gate is ignored while you're playing the rat.
 
 ### The physics, briefly
 Verlet integration (velocity = position − previous position, 1% damping), 11 points, 11 sticks
@@ -276,7 +342,8 @@ trade-off for something tiny, stable and easy to blend with animation.
 
 ## 7. Looks and skins
 
-- `GANGSTER_LOOK` and every entry in `SKINS` share one shape:
+- Every entry in `GANGSTER_LOOKS` (one per kind; `GANGSTER_LOOK` is the thug's) and in `SKINS` share
+  one shape (a gangster's `Ragdoll` gets its look through the `look` option):
 
 ```js
 mySkin: {
@@ -329,8 +396,8 @@ behind, 0.45 m up, 72° FOV, fog 10–50 m, both house rows shown, kept inside t
   hydrants, the homeless guy, taxi bonnets), F bite (staggers a gangster within ~0.5 m of the snout,
   30-frame cooldown). `update()` packs the keys into `ratPlayer.input`; `driveRat()` moves it;
   `animateRat()` is shared with the AI rats.
-- While you're a rat the man stands still, `gangsterBrain` returns no input, nothing spawns and the
-  survival timer is paused, so it's a free-roam mode. Gangsters' wind-ups are cancelled on switching.
+- While you're a rat the man stands still, `gangsterBrain` returns no input, nothing spawns, bottles
+  hang in the air, the gate is ignored and the run timer is paused, so it's a free-roam mode. Gangsters' wind-ups are cancelled on switching.
 - `showFrontRow()` decides whether the far-side row is visible (rat mode or behind view); new chunks
   use it too.
 
@@ -404,10 +471,12 @@ Pattern for new ambient things: a pool or a fixed-size array that wraps around `
 
 ## 11. HUD and UI
 
-- Top-left: timer, hearts (♥/♡ from `man.hp`), best time / KOs / farthest. Top-right: skin picker,
-  camera button, "Playing:" (man/rat) button, and the green "↑ Back to the street" button while the rat
-  is underground. Bottom: help bar (rewritten for the man, the rat and the sewer). Centre: "Busted!".
-  Between the 3D view and the HUD: `#fade`, the black-out for the manhole transitions.
+- Top-left: block, "Heading for W 11th St", hearts (♥/♡ from `man.hp`), crew left (or "Green light"),
+  best blocks / KOs / time. Top-right: skin picker, camera button, "Playing:" (man/rat) button, and the
+  green "↑ Back to the street" button while the rat is underground. Centre: the banner (`state.banner`,
+  set with `say()`; fades over its last 20 frames). Bottom: Big Tony's health bar while he's standing,
+  and the help bar (rewritten for the man, the rat and the sewer). Between the 3D view and the HUD:
+  `#fade`, the black-out for the manhole transitions and the restart after getting busted.
 - Overlay buttons must call `e.preventDefault()` on `mousedown` so they never keep focus — otherwise
   the next Space press would click them.
 - Style: white text with dark shadow, translucent `#0006` pills, `system-ui`.
@@ -436,8 +505,15 @@ const place = (g, x, z) => { const sx = x - g.x, sz = z - g.z; g.x = x; g.z = z;
 ```
 
 - **Combat checks after any tuning:** an idle hero gets hit by both punches and kicks; 3 punches, 2
-  kicks, and punch + kick each knock out every gangster (their `accel` differs, test all three);
+  kicks, and punch + kick each knock out a thug (their `accel` differs, test several);
   hitting a gangster during his wind-up cancels it; flying kicks land at low and mid jump height.
+- **Kind checks:** `game.spawnGangster('runner' | 'bruiser' | 'thrower' | 'boss')`, then place him.
+  A runner that lands a hit has `stolen` set and the heart comes back when he's knocked out; a punch
+  leaves a bruiser's `stun` at 0 but a kick doesn't; a thrower 6 m away hits an idle man with a bottle
+  within ~60 frames; Big Tony's charge hits an idle man after ~75 frames, and goes `dizzy` at the street
+  edge if the man moves out of the way after the wind-up.
+- **Skipping ahead:** `game.wave.queue = []`, mark the gangsters gone (`g.leaveT = 1`) and step a few
+  frames to clear a block; move the man past the crossing, or call `game.startBlock(n)`.
 - **Looking closely:** pause, `render()`, then zoom with
   `canvas.style.transformOrigin = 'Xpx Ypx'; canvas.style.transform = 'scale(5)'` and screenshot.
   Reset the transform afterwards.
@@ -456,9 +532,11 @@ const place = (g, x, z) => { const sx = x - g.x, sz = z - g.z; g.x = x; g.z = z;
 - The manhole hole is an opaque disc, so the rat vanishes into it rather than visibly sinking; only the
   rat you play can fall in.
 - The far-side row only exists in behind view; side view relies on the camera never turning round.
+- All the traffic signals share materials, so the lights behind you change too.
 - Ideas that fit the existing patterns: more skins, a subway entrance or bodega obstacle, pigeons
   (rats' state machine), a second song that switches when the hearts run low, pickups (a slice that
-  restores a heart), a block-the-blow move driven through `control()`.
+  restores a heart), a block-the-blow move driven through `control()`, Pizza Rat delivering slices to
+  the turtles to call one up as backup, a combo meter, grabbing and throwing knocked-out gangsters.
 
 ## 15. Checklist for changes
 

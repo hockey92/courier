@@ -17,5 +17,15 @@ canvas { display: block; }
 #camBtn:hover, #playBtn:hover { background: #000a; }
 #streetBtn:hover { background: #245437; }
 #hud .hearts { font-size: 22px; color: #ff4d5e; letter-spacing: 2px; margin-top: 2px; }
-#busted { position: fixed; top: 28%; width: 100%; text-align: center; color: #fff; font: 800 34px system-ui; text-shadow: 0 3px 8px #000a; pointer-events: none; display: none; }
+#hud .street { font-size: 14px; font-weight: 700; color: #9fe0b0; margin-top: 1px; }
+#hud .crew { font-size: 15px; font-weight: 700; margin-top: 2px; }
+#hud .crew.go { color: #7dffa8; }
+#banner { position: fixed; top: 24%; width: 100%; text-align: center; color: #fff; text-shadow: 0 3px 8px #000a; pointer-events: none; display: none; }
+#banner .title { font: 800 38px system-ui, sans-serif; }
+#banner .small { font: 600 16px system-ui, sans-serif; margin-top: 6px; opacity: .92; }
+#boss { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); width: min(320px, 60vw); text-align: center; color: #fff;
+  text-shadow: 0 1px 3px #000; pointer-events: none; display: none; }
+#boss .name { font: 800 14px system-ui, sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+#boss .bar { height: 10px; margin-top: 4px; background: #0008; border-radius: 5px; overflow: hidden; }
+#bossFill { height: 100%; width: 100%; background: linear-gradient(#ff6a5a, #c4262e); }
 #help { position: fixed; bottom: 12px; width: 100%; text-align: center; color: #fffc; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; }

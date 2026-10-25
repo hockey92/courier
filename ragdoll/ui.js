@@ -1,5 +1,5 @@
 // On-screen UI: skin picker, camera switch, man/rat switch, help bar and the HUD.
-import { Z_MAX } from './config.js';
+import { Z_MAX, streetName } from './config.js';
 import { state } from './state.js';
 import { camera, scene } from './scene.js';
 import { liveChunks } from './world.js';
@@ -29,7 +29,7 @@ export const HELP_MOVE = {
   behind: '← → turn · ↑ run · ↓ run back',
   side: '← → run · ↑ ↓ move up and down the street',
 };
-export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · knock gangsters out with punches, kicks or a stomp on the head · they fight back, so watch your hearts! · C change skin · V camera · M sound on/off';
+export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
 export function setCamMode(mode) {
   state.camMode = mode;
   localStorage.setItem('ragdollCam', mode);
@@ -95,12 +95,17 @@ for (const [id, dir] of [['skinPrev', -1], ['skinNext', 1]]) {
   b.addEventListener('click', () => changeSkin(dir));
 }
 
-// HUD: timer, hearts, best/KOs/farthest and the "Busted!" banner
-export const hudTime = document.getElementById('time');
+// HUD: block, street, hearts, crew left, best/KOs/time, the banner in the middle and Big Tony's health
+export const hudBlock = document.getElementById('block');
+export const hudStreet = document.getElementById('street');
+export const hudCrew = document.getElementById('crew');
 export const hudSub = document.getElementById('sub');
 export const hudHearts = document.getElementById('hearts');
-export const busted = document.getElementById('busted');
+export const bannerEl = document.getElementById('banner');
+export const bannerTitle = document.getElementById('bannerTitle'), bannerSub = document.getElementById('bannerSub');
+export const bossEl = document.getElementById('boss'), bossFill = document.getElementById('bossFill');
 export const fadeEl = document.getElementById('fade');
+export let shownBanner = null;
 export let sewerHelpShown = false, streetBtnShown = false;
 
 export function updateHud() {
@@ -113,9 +118,21 @@ export function updateHud() {
   }
   const down = !!(state.playingRat && (r.inSewer || r.hole));
   if (down !== streetBtnShown) { streetBtnShown = down; streetBtn.style.display = down ? 'block' : 'none'; }
-  hudTime.textContent = state.survived.toFixed(1) + 's';
+  hudBlock.textContent = `Block ${state.block}`;
+  hudStreet.textContent = `Heading for ${streetName(state.block)}`;
+  hudCrew.textContent = state.gateOpen ? 'Green light: cross the street →' : `Crew left: ${state.crewLeft}`;
+  hudCrew.classList.toggle('go', state.gateOpen);
   const hearts = man.alive ? Math.max(0, man.hp) : 0;
   hudHearts.textContent = '♥'.repeat(hearts) + '♡'.repeat(man.maxHp - hearts);
-  hudSub.textContent = `Best: ${state.best.toFixed(1)}s · KOs: ${state.knockouts} · Farthest: ${Math.round(state.farthest)}m`;
-  busted.style.display = state.caughtTimer > 0 ? 'block' : 'none';
+  hudSub.textContent = `Best: ${state.bestBlocks} block${state.bestBlocks === 1 ? '' : 's'} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
+  const b = state.banner;
+  if (b !== shownBanner) {
+    shownBanner = b;
+    bannerEl.style.display = b ? 'block' : 'none';
+    if (b) { bannerTitle.textContent = b.text; bannerSub.textContent = b.sub; }
+  }
+  if (b) bannerEl.style.opacity = Math.min(1, b.t / 20);
+  const boss = gangsters.find(g => g.type === 'boss' && !g.leaveT);
+  bossEl.style.display = boss ? 'block' : 'none';
+  if (boss) bossFill.style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
 }

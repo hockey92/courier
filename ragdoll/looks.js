@@ -35,6 +35,86 @@ export const GANGSTER_LOOK = {
   },
 };
 
+// one look per kind of gangster (see GANG_TYPES in combat.js)
+export const GANGSTER_LOOKS = {
+  thug: GANGSTER_LOOK,
+
+  runner: {
+    top: '#c4262e', legs: '#c4262e', skin: '#c48a62',
+    shoes: { color: '#f2f2f2', sole: '#d8d8d8', stripe: '#c4262e' },
+    // red tracksuit with white stripes, cap on backwards and a cheeky grin
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const white = mat('#f4f4f4'), cap = mat('#1b1b1b');
+      deco(head, 0.3, 0.1, 0.3, cap, 0, h - 0.01, 0);                                     // cap crown
+      deco(head, 0.15, 0.02, 0.27, cap, -h - 0.07, h - 0.055, 0);                         // brim, backwards
+      basicFace(k, { hair: '#2a1a12', nose: '#b07a55' });
+      deco(head, 0.02, 0.02, 0.1, white, h + 0.006, -0.075, 0);                           // grin
+      for (const s of [-1, 1]) deco(torso, 0.05, 2 * tl, 0.01, white, 0, 0, s * 0.162);  // side stripes
+      deco(torso, 0.01, 2 * tl - 0.04, 0.02, mat('#d8d8d8'), 0.123, 0, 0);                // zip
+      hands(k, '#c48a62', '#f4f4f4');
+    },
+  },
+
+  bruiser: {
+    top: '#efece2', arms: '#d9a77c', legs: '#2b3140', skin: '#d9a77c',
+    shoes: { color: '#3a2a1e', sole: '#1a120c' },
+    // white vest, bare arms, shaved head, a gold chain and a scowl
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const gold = mat('#e8b923', { metalness: 0.6, roughness: 0.3, emissive: 0x3a2a00 });
+      basicFace(k, { hair: '#3a2a20', nose: '#c08860' });
+      deco(head, 0.02, 0.06, 0.27, mat('#a87a5a'), h + 0.002, -0.1, 0);                   // stubble
+      deco(head, 0.02, 0.015, 0.08, mat('#5a2a20'), h + 0.006, -0.085, 0);                // scowl
+      deco(torso, 0.02, 0.03, 0.2, gold, 0.125, tl - 0.06, 0);                            // chain
+      deco(torso, 0.025, 0.05, 0.05, gold, 0.128, tl - 0.11, 0);                          // pendant
+      deco(torso, 0.25, 0.06, 0.33, mat('#3a2a1e'), 0, -tl + 0.03, 0);                    // belt
+      hands(k, '#d9a77c');
+    },
+  },
+
+  thrower: {
+    top: '#5b4636', arms: '#d9d2bf', legs: '#4a4a55', skin: '#e0ae88',
+    shoes: { color: '#2a1d16' },
+    // newsboy cap, waistcoat over rolled-up sleeves, and a moustache
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const tweed = mat('#6b5a48');
+      deco(head, 0.32, 0.07, 0.31, tweed, 0.01, h + 0.01, 0);                             // newsboy cap
+      deco(head, 0.1, 0.02, 0.26, tweed, h + 0.04, h - 0.03, 0);                          // short brim
+      deco(head, 0.04, 0.03, 0.04, tweed, 0, h + 0.055, 0);                               // button on top
+      basicFace(k, { hair: '#5a3a22', nose: '#c8906a' });
+      deco(head, 0.03, 0.03, 0.14, mat('#5a3a22'), h + 0.01, -0.05, 0);                   // moustache
+      deco(torso, 0.022, 0.24, 0.1, mat('#d9d2bf'), 0.124, tl - 0.12, 0);                 // shirt
+      for (const y of [-0.1, -0.02, 0.06]) deco(torso, 0.024, 0.02, 0.02, mat('#c9a24a'), 0.127, y, 0.06); // buttons
+      hands(k, '#e0ae88');
+    },
+  },
+
+  boss: {
+    top: '#ece6d6', legs: '#ece6d6', skin: '#d9a07a',
+    shoes: { color: '#f4f4f4', sole: '#222' },
+    // Big Tony: cream pinstripe suit, black shirt, white fedora, shades, gold chain and a fat cigar
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const dark = mat('#111'), white = mat('#f4f1ea');
+      const gold = mat('#e8b923', { metalness: 0.6, roughness: 0.3, emissive: 0x3a2a00 });
+      deco(head, 0.03, 0.06, 0.25, dark, h + 0.01, 0.03, 0);                              // shades
+      deco(head, 0.02, 0.025, 0.1, dark, h + 0.005, -0.07, 0);                            // grim mouth
+      deco(head, 0.16, 0.045, 0.045, mat('#8a5a30'), h + 0.07, -0.07, 0.05);              // cigar
+      deco(head, 0.02, 0.045, 0.045, mat('#ff6633', { emissive: 0xff4400 }), h + 0.155, -0.07, 0.05);
+      deco(head, 0.46, 0.035, 0.46, white, 0, h + 0.02, 0);                               // fedora brim
+      deco(head, 0.28, 0.17, 0.28, white, 0, h + 0.11, 0);                                // fedora crown
+      deco(head, 0.285, 0.045, 0.285, dark, 0, h + 0.06, 0);                              // hat band
+      for (const z of [-0.12, -0.08, 0.08, 0.12]) deco(torso, 0.006, 2 * tl - 0.02, 0.008, mat('#a8a090'), 0.122, 0, z); // pinstripes
+      deco(torso, 0.022, 0.22, 0.13, dark, 0.124, tl - 0.11, 0);                          // black shirt
+      deco(torso, 0.02, 0.03, 0.12, gold, 0.128, tl - 0.05, 0);                           // chain
+      deco(torso, 0.024, 0.04, 0.05, mat('#c4262e'), 0.127, tl - 0.12, -0.11);            // pocket square
+      hands(k, '#d9a07a', '#f4f1ea');
+    },
+  },
+};
+
 export const SKINS = {
   newyorker: {
     name: 'New Yorker',

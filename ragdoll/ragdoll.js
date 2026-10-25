@@ -27,6 +27,8 @@ export class Ragdoll {
       x, z, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, onGround: true, jumpsLeft: 2,
       phase: 0, run: 0, idle: Math.random() * 6, flip: 0, flipping: false,
       knocked: 0, stiffness: 0.5, invuln: 0, blocked: false,
+      // heavier bodies are knocked about less; bulk widens the limbs and torso (not their length)
+      mass: 1, bulk: 1, look: null,
       speed: RUN_SPEED, accel: 0.12, canFlip: true, style: 'hero',
       punchT: -1, punchHit: false, windup: 3, stun: 0, hp: 3, maxHp: 3, punchCooldown: 0,
       kickT: -1, kickHit: false, kickWindup: KICK_WINDUP, skin: 'newyorker',
@@ -158,6 +160,7 @@ export class Ragdoll {
 
   // took a hit but is still standing: knocked back a step and dazed for a moment
   stagger(dx, dz, power = 1) {
+    power /= this.mass;
     this.stun = 15 + 10 * power;
     this.cancelAttacks();
     this.vx = dx * 0.045 * power; this.vz = dz * 0.045 * power;
@@ -167,6 +170,7 @@ export class Ragdoll {
   }
 
   knockOut(dx, dz, frames, power = 1) {
+    power /= Math.sqrt(this.mass);
     this.knocked = frames;
     this.stiffness = 0;
     this.flip = 0; this.flipping = false;
@@ -348,10 +352,11 @@ export class Ragdoll {
     if (this.group) scene.remove(this.group);
     this.cup = this.shoes = null;
     const g = this.group = new THREE.Group();
-    const look = this.style === 'gangster' ? GANGSTER_LOOK : SKINS[this.skin] || SKINS.newyorker;
+    const look = this.look || (this.style === 'gangster' ? GANGSTER_LOOK : SKINS[this.skin] || SKINS.newyorker);
     const top = mat(look.top), arms = mat(look.arms || look.top), legs = mat(look.legs);
     const part = (w, len, d, m) => {
       const mesh = new THREE.Mesh(boxGeo(w, Math.max(0.02, len - JOINT_GAP), d), m);
+      mesh.scale.set(this.bulk, 1, this.bulk);
       mesh.castShadow = true; g.add(mesh);
       return mesh;
     };
@@ -364,6 +369,7 @@ export class Ragdoll {
     };
     const skin = mat(look.skin);
     const head = this.parts.head = new THREE.Mesh(boxGeo(HEAD, HEAD, HEAD), skin);
+    head.scale.setScalar(Math.sqrt(this.bulk));
     head.castShadow = true; g.add(head);
     const deco = (parent, w, hh, d, m, x, y, z) => {
       const mesh = new THREE.Mesh(boxGeo(w, hh, d), m);
@@ -372,6 +378,7 @@ export class Ragdoll {
     if (look.shoes) {
       this.shoes = [0, 1].map(() => {
         const s = new THREE.Mesh(boxGeo(0.24, 0.1, 0.15), mat(look.shoes.color));
+        s.scale.set(this.bulk, 1, this.bulk);
         s.castShadow = true; g.add(s);
         if (look.shoes.sole) deco(s, 0.25, 0.03, 0.16, mat(look.shoes.sole), 0, -0.04, 0);
         if (look.shoes.stripe) deco(s, 0.1, 0.025, 0.156, mat(look.shoes.stripe), -0.01, 0.005, 0);

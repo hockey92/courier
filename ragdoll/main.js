@@ -1,5 +1,4 @@
 // Entry point: the fixed-step update, render and the main loop.
-import { MAX_GANGSTERS } from './config.js';
 import { state } from './state.js';
 import { camera, renderer, scene } from './scene.js';
 import { boxesNear, liveChunks, syncChunks } from './world.js';
@@ -12,8 +11,10 @@ import { updateCamera } from './view.js';
 import { setCamMode, setPlayingRat, setSkin, updateHud } from './ui.js';
 import { renderGarbage, updateGarbage } from './garbage.js';
 import { rats, updateRats } from './rats.js';
-import { behind, checkHits, gangsterBrain, resolvePunches, spawnGangster } from './combat.js';
+import { behind, checkHits, gangsterBrain, renderGangs, resolvePunches, spawnGangster, updateGangs } from './combat.js';
+import { bottles, renderBottles } from './bottles.js';
 import { renderSewer, sewer, updateSewer } from './sewer.js';
+import { holdAtGate, startBlock, updateBlocks, wave } from './blocks.js';
 
 // ---------- Update ----------
 function update() {
@@ -47,6 +48,7 @@ function update() {
   }
   man.control(ix, iz, queued.jump, queued.punch, queued.kick);
   queued.jump = queued.punch = queued.kick = false;
+  holdAtGate();
   if (wasDown && man.alive) man.invuln = 90;
 
   for (const g of gangsters) {
@@ -67,20 +69,18 @@ function update() {
   for (const g of gangsters) g.step();
 
   if (man.alive && !state.playingRat) state.survived += 1 / 60;
-  state.farthest = Math.max(state.farthest, Math.abs(man.x));
-  if (!state.playingRat && --state.spawnTimer <= 0 && gangsters.length < MAX_GANGSTERS) {
-    spawnGangster();
-    state.spawnTimer = 480;
-  }
+  updateGangs();
 
   updateGarbage();
   updateRats();
   updateSewer();
+  updateBlocks(); // after the sewer, which also eases the fade
 
   updateDust();
 
   if (state.shake > 0) state.shake *= 0.85;
   if (state.caughtTimer > 0) state.caughtTimer--;
+  if (state.banner && --state.banner.t <= 0) state.banner = null;
 }
 
 // ---------- Render ----------
@@ -91,6 +91,8 @@ function render() {
   for (const g of gangsters) g.updateMeshes();
   const t = performance.now() / 1000;
   for (const c of liveChunks.values()) for (const animate of c.chillers) animate(t);
+  renderGangs(t);
+  renderBottles();
   renderSewer(t);
   renderGarbage();
   renderer.render(scene, camera);
@@ -99,6 +101,7 @@ function render() {
 
 // Fixed-timestep loop so physics feels the same on any refresh rate
 setCamMode(state.camMode);
+startBlock(1);
 
 let last = performance.now(), acc = 0, paused = false;
 function loop(now) {
@@ -116,5 +119,6 @@ window.game = {
   punch() { queued.punch = true; },
   kick() { queued.kick = true; },
   music, rats, setSkin, setPlayingRat, sewer,
+  state, wave, startBlock, spawnGangster, bottles,
   set paused(v) { paused = v; }, get paused() { return paused; },
 };

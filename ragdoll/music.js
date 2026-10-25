@@ -203,6 +203,20 @@ export const music = (() => {
     [0, 4, 7, 12, 16].forEach((n, k) => blip('square', hz(84 + n), hz(84 + n) * 1.01, ctx.currentTime + k * 0.07, 0.14, 0.03));
   }
 
-  return { start, toggle, squeak, fall, plop, cheer, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
+  // a bottle smashing: a few bright, random little tinks
+  function clink() {
+    if (!ctx || !on) return;
+    for (let k = 0; k < 3; k++) {
+      const f = 2600 + Math.random() * 2200;
+      blip('triangle', f, f * 0.8, ctx.currentTime + k * 0.03 + Math.random() * 0.02, 0.09, 0.03);
+    }
+  }
+  // Big Tony turns up: a low two-tone warning
+  function alarm() {
+    if (!ctx || !on) return;
+    for (let k = 0; k < 4; k++) blip('square', k % 2 ? 196 : 247, k % 2 ? 190 : 240, ctx.currentTime + k * 0.18, 0.16, 0.035);
+  }
+
+  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
 })();
 addEventListener('pointerdown', () => music.start());

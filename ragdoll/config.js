@@ -8,8 +8,14 @@ export const HEAD = 19 * S, JOINT_GAP = 5 * S;
 export const HIP_W = 0.1, SH_W = 0.2, BODY_R = 0.22;
 export const Z_MIN = -4.7, Z_MAX = 5.6;
 export const CHUNK = 16, FAR_CHUNK = 160;
-export const MAX_GANGSTERS = 3;
 export const KICK_WINDUP = 6;
+// the street is cut into blocks of three chunks; block n ends at the crossing at x = n * BLOCK
+export const BLOCK = 48, FIRST_STREET = 11;
+export const streetNumber = n => FIRST_STREET + n - 1;
+export function streetName(n) {
+  const s = streetNumber(n), teen = s % 100 >= 11 && s % 100 <= 13;
+  return `W ${s}${teen ? 'th' : ['th', 'st', 'nd', 'rd'][s % 10] || 'th'} St`;
+}
 
 export function seeded(seed) {
   return () => {
