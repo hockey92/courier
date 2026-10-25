@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ball Defender</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0d0f1a;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  canvas { display: block; }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 16px;
+    color: #fff;
+    font-size: 18px;
+    user-select: none;
+  }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    text-align: center;
+  }
+  #overlay h1 { font-size: 48px; margin: 0 0 12px; }
+  #overlay p { font-size: 18px; margin: 6px 0; opacity: 0.85; }
+  #overlay button {
+    margin-top: 20px;
+    padding: 12px 32px;
+    font-size: 20px;
+    border: none;
+    border-radius: 999px;
+    background: #4fd1c5;
+    color: #0d0f1a;
+    cursor: pointer;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span></div>
+<div id="overlay">
+  <h1>Ball Defender</h1>
+  <p>Your ball shoots automatically.</p>
+  <p>Move with WASD or the arrow keys and survive as long as you can.</p>
+  <button id="start">Play</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const overlay = document.getElementById("overlay");
+const startBtn = document.getElementById("start");
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const keys = {};
+window.addEventListener("keydown", e => (keys[e.key.toLowerCase()] = true));
+window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
+
+let player, bullets, enemies, particles, score, lives, elapsed;
+let shootTimer, spawnTimer, invulnerable, running = false, lastTime = 0;
+
+function reset() {
+  player = { x: W / 2, y: H / 2, r: 18, speed: 260 };
+  bullets = [];
+  enemies = [];
+  particles = [];
+  score = 0;
+  lives = 3;
+  elapsed = 0;
+  shootTimer = 0;
+  spawnTimer = 0;
+  invulnerable = 0;
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+}
+
+function spawnEnemy() {
+  const side = Math.floor(Math.random() * 4);
+  const margin = 30;
+  let x, y;
+  if (side === 0) { x = Math.random() * W; y = -margin; }
+  else if (side === 1) { x = W + margin; y = Math.random() * H; }
+  else if (side === 2) { x = Math.random() * W; y = H + margin; }
+  else { x = -margin; y = Math.random() * H; }
+
+  const r = 10 + Math.random() * 14;
+  const hp = r > 18 ? 2 : 1;
+  const speed = 60 + Math.random() * 40 + elapsed * 2;
+  const hue = Math.floor(Math.random() * 60);
+  enemies.push({ x, y, r, hp, speed, color: `hsl(${hue}, 85%, 60%)` });
+}
+
+function nearestEnemy() {
+  let best = null, bestDist = Infinity;
+  for (const e of enemies) {
+    const d = (e.x - player.x) ** 2 + (e.y - player.y) ** 2;
+    if (d < bestDist) { bestDist = d; best = e; }
+  }
+  return best;
+}
+
+function shoot() {
+  const target = nearestEnemy();
+  if (!target) return;
+  const angle = Math.atan2(target.y - player.y, target.x - player.x);
+  const speed = 600;
+  bullets.push({
+    x: player.x,
+    y: player.y,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    r: 5,
+  });
+}
+
+function explode(x, y, color, count = 14) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 50 + Math.random() * 200;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.6, color });
+  }
+}
+
+function update(dt) {
+  elapsed += dt;
+
+  let dx = 0, dy = 0;
+  if (keys["w"] || keys["arrowup"]) dy -= 1;
+  if (keys["s"] || keys["arrowdown"]) dy += 1;
+  if (keys["a"] || keys["arrowleft"]) dx -= 1;
+  if (keys["d"] || keys["arrowright"]) dx += 1;
+  if (dx || dy) {
+    const len = Math.hypot(dx, dy);
+    player.x += (dx / len) * player.speed * dt;
+    player.y += (dy / len) * player.speed * dt;
+    player.x = Math.max(player.r, Math.min(W - player.r, player.x));
+    player.y = Math.max(player.r, Math.min(H - player.r, player.y));
+  }
+
+  const fireInterval = Math.max(0.1, 0.3 - elapsed * 0.002);
+  shootTimer -= dt;
+  if (shootTimer <= 0) {
+    shoot();
+    shootTimer = fireInterval;
+  }
+
+  const spawnInterval = Math.max(0.12, 0.5 - elapsed * 0.008);
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    const count = 1 + Math.floor(elapsed / 25);
+    for (let i = 0; i < count; i++) spawnEnemy();
+    spawnTimer = spawnInterval;
+  }
+
+  for (const b of bullets) {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+  }
+  bullets = bullets.filter(b => b.x > -20 && b.x < W + 20 && b.y > -20 && b.y < H + 20);
+
+  for (const e of enemies) {
+    const a = Math.atan2(player.y - e.y, player.x - e.x);
+    e.x += Math.cos(a) * e.speed * dt;
+    e.y += Math.sin(a) * e.speed * dt;
+  }
+
+  for (const e of enemies) {
+    for (const b of bullets) {
+      if (b.dead) continue;
+      if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (e.r + b.r) ** 2) {
+        b.dead = true;
+        e.hp--;
+        if (e.hp <= 0) {
+          e.dead = true;
+          score += e.r > 18 ? 2 : 1;
+          scoreEl.textContent = score;
+          explode(e.x, e.y, e.color);
+          break;
+        }
+      }
+    }
+  }
+
+  if (invulnerable > 0) invulnerable -= dt;
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (e.r + player.r) ** 2) {
+      e.dead = true;
+      explode(e.x, e.y, e.color);
+      if (invulnerable <= 0) {
+        lives--;
+        livesEl.textContent = lives;
+        invulnerable = 1.5;
+        explode(player.x, player.y, "#4fd1c5", 24);
+        if (lives <= 0) return gameOver();
+      }
+    }
+  }
+
+  bullets = bullets.filter(b => !b.dead);
+  enemies = enemies.filter(e => !e.dead);
+
+  for (const p of particles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.94;
+    p.vy *= 0.94;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+function circle(x, y, r, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function draw() {
+  ctx.fillStyle = "rgba(13, 15, 26, 0.35)";
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / 0.6);
+    circle(p.x, p.y, 3, p.color);
+  }
+  ctx.globalAlpha = 1;
+
+  for (const e of enemies) {
+    circle(e.x, e.y, e.r, e.color);
+    if (e.hp > 1) {
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  ctx.shadowColor = "#fff59d";
+  ctx.shadowBlur = 10;
+  for (const b of bullets) circle(b.x, b.y, b.r, "#fff59d");
+  ctx.shadowBlur = 0;
+
+  const blink = invulnerable > 0 && Math.floor(invulnerable * 10) % 2 === 0;
+  if (!blink) {
+    ctx.shadowColor = "#4fd1c5";
+    ctx.shadowBlur = 20;
+    circle(player.x, player.y, player.r, "#4fd1c5");
+    ctx.shadowBlur = 0;
+  }
+}
+
+function loop(time) {
+  if (!running) return;
+  const dt = Math.min(0.05, (time - lastTime) / 1000);
+  lastTime = time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function start() {
+  reset();
+  ctx.fillStyle = "#0d0f1a";
+  ctx.fillRect(0, 0, W, H);
+  overlay.classList.add("hidden");
+  running = true;
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function gameOver() {
+  running = false;
+  overlay.innerHTML = `
+    <h1>Game Over</h1>
+    <p>You destroyed ${score} points worth of balls in ${elapsed.toFixed(1)}s.</p>
+    <button id="start">Play again</button>`;
+  overlay.classList.remove("hidden");
+  document.getElementById("start").addEventListener("click", start);
+}
+
+startBtn.addEventListener("click", start);
+</script>
+</body>
+</html>
