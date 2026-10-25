@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Ball Defender</title>
+<title>Zombie Maze</title>
 <style>
   html, body {
     margin: 0;
@@ -54,9 +54,9 @@
 <canvas id="game"></canvas>
 <div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
-  <h1>Ball Defender</h1>
-  <p>You are lost in an endless labyrinth. Your ball shoots automatically at any enemy it can see.</p>
-  <p>Enemies close in from beyond the edges of the screen. Move with WASD or the arrow keys.</p>
+  <h1>Zombie Maze</h1>
+  <p>You are lost in an endless labyrinth full of zombies. You shoot automatically at any zombie you can see.</p>
+  <p>They close in from beyond the edges of the screen. Move with WASD or the arrow keys.</p>
   <p>Grab the purple bonuses to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
@@ -350,7 +350,7 @@ function reset() {
   chunks.clear();
   distKey = "";
   const start = cellCenter(0, 0);
-  player = { x: start.x, y: start.y, r: 16, speed: 220 };
+  player = { x: start.x, y: start.y, r: 16, speed: 220, aim: 0, aimTimer: 0, walk: 0, moving: false };
   bullets = [];
   enemies = [];
   particles = [];
@@ -393,6 +393,13 @@ function randInt(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
 
+function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+const ZOMBIE_SHIRTS = ["#5d4037", "#455a64", "#6a1b9a", "#33691e", "#78909c", "#8d6e63", "#7f1d1d"];
+const ZOMBIE_PANTS = ["#3e2723", "#263238", "#37474f", "#4e342e"];
+
 function updateShotsHud() {
   shotsEl.textContent = shots > 1 ? `x${shots} (${Math.ceil(shotsTimer)}s)` : "x1";
 }
@@ -425,14 +432,19 @@ function spawnEnemy() {
 
     const p = cellCenter(c, r);
     const radius = 9 + Math.random() * 7;
-    const hue = Math.floor(Math.random() * 60);
+    const hp = radius > 13 ? 2 : 1;
     enemies.push({
       x: p.x + (Math.random() - 0.5) * 10,
       y: p.y + (Math.random() - 0.5) * 10,
       r: radius,
-      hp: radius > 13 ? 2 : 1,
+      hp,
+      maxHp: hp,
       speed: 45 + Math.random() * 30 + elapsed * 1.2,
-      color: `hsl(${hue}, 85%, 60%)`,
+      skin: `hsl(${75 + Math.random() * 35}, 38%, ${40 + Math.random() * 10}%)`,
+      shirt: pick(ZOMBIE_SHIRTS),
+      pants: pick(ZOMBIE_PANTS),
+      walk: Math.random() * Math.PI * 2,
+      flash: 0,
     });
     return;
   }
@@ -453,6 +465,8 @@ function shoot() {
   const target = nearestVisibleEnemy();
   if (!target) return;
   const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
+  player.aim = baseAngle;
+  player.aimTimer = 0.5;
   const speed = 600;
   const spread = 0.15;
   for (let i = 0; i < shots; i++) {
@@ -522,11 +536,15 @@ function update(dt) {
   if (keys["s"] || keys["arrowdown"]) dy += 1;
   if (keys["a"] || keys["arrowleft"]) dx -= 1;
   if (keys["d"] || keys["arrowright"]) dx += 1;
-  if (dx || dy) {
+  player.moving = !!(dx || dy);
+  player.aimTimer -= dt;
+  if (player.moving) {
     const len = Math.hypot(dx, dy);
     player.x += (dx / len) * player.speed * dt;
     player.y += (dy / len) * player.speed * dt;
     pushOutOfWalls(player);
+    player.walk += dt * 14;
+    if (player.aimTimer <= 0) player.aim = Math.atan2(dy, dx);
   }
   updateCamera();
   updateDistances();
@@ -596,6 +614,8 @@ function update(dt) {
     const { c, r } = cellOf(e.x, e.y);
     if (!inBox(c, r)) e.dead = true;
     else moveEnemy(e, dt);
+    e.walk += dt * e.speed / 9;
+    if (e.flash > 0) e.flash -= dt;
   }
   separateEnemies();
   for (const e of enemies) pushOutOfWalls(e);
@@ -607,11 +627,13 @@ function update(dt) {
       if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (e.r + b.r) ** 2) {
         b.dead = true;
         e.hp--;
+        e.flash = 0.1;
         if (e.hp <= 0) {
           e.dead = true;
-          score += e.r > 13 ? 2 : 1;
+          score += e.maxHp;
           scoreEl.textContent = score;
-          explode(e.x, e.y, e.color);
+          explode(e.x, e.y, e.skin, 10);
+          explode(e.x, e.y, "#8e0000", 6);
           break;
         }
       }
@@ -623,12 +645,12 @@ function update(dt) {
     if (e.dead) continue;
     if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (e.r + player.r) ** 2) {
       e.dead = true;
-      explode(e.x, e.y, e.color);
+      explode(e.x, e.y, e.skin);
       if (invulnerable <= 0) {
         lives--;
         livesEl.textContent = lives;
         invulnerable = 1.5;
-        explode(player.x, player.y, "#4fd1c5", 24);
+        explode(player.x, player.y, "#ff5252", 24);
         if (lives <= 0) return gameOver();
       }
     }
@@ -696,27 +718,143 @@ function draw() {
     ctx.stroke();
   }
 
-  for (const e of enemies) {
-    if (!onScreen(e.x, e.y, 30)) continue;
-    circle(e.x, e.y, e.r, e.color);
-    if (e.hp > 1) {
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+  const blink = invulnerable > 0 && Math.floor(invulnerable * 10) % 2 === 0;
+  const actors = enemies.filter(e => onScreen(e.x, e.y, 40));
+  if (!blink) actors.push(player);
+  actors.sort((a, b) => a.y - b.y);
+  for (const a of actors) {
+    if (a === player) drawMan(player);
+    else drawZombie(a);
   }
 
   ctx.shadowColor = "#fff59d";
   ctx.shadowBlur = 10;
-  for (const b of bullets) circle(b.x, b.y, b.r, "#fff59d");
+  for (const b of bullets) circle(b.x, b.y, 3.5, "#fff59d");
   ctx.shadowBlur = 0;
+}
 
-  const blink = invulnerable > 0 && Math.floor(invulnerable * 10) % 2 === 0;
-  if (!blink) {
-    ctx.shadowColor = "#4fd1c5";
-    ctx.shadowBlur = 20;
-    circle(player.x, player.y, player.r, "#4fd1c5");
-    ctx.shadowBlur = 0;
+function shadow(y, rx) {
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.beginPath();
+  ctx.ellipse(0, y, rx, rx * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawMan(p) {
+  const facing = Math.cos(p.aim) >= 0 ? 1 : -1;
+  const swing = p.moving ? Math.sin(p.walk) * 4 : 0;
+  const skin = "#f1c27d";
+  const shirt = "#26a69a";
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(p.r / 16, p.r / 16);
+  shadow(16, 11);
+  ctx.scale(facing, 1);
+
+  ctx.fillStyle = "#1e3a8a";
+  ctx.fillRect(-6 + swing * 0.5, 4, 5, 11);
+  ctx.fillRect(1 - swing * 0.5, 4, 5, 11);
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(-6 + swing * 0.5, 14, 6, 3);
+  ctx.fillRect(1 - swing * 0.5, 14, 6, 3);
+
+  ctx.fillStyle = shirt;
+  ctx.beginPath();
+  ctx.roundRect(-7, -7, 14, 13, 4);
+  ctx.fill();
+  ctx.fillStyle = "#5d4037";
+  ctx.fillRect(-7, 3, 14, 2);
+
+  circle(0, -13, 6.5, skin);
+  ctx.fillStyle = "#4e342e";
+  ctx.beginPath();
+  ctx.arc(0, -14, 7, Math.PI, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(-7, -14, 4, 5);
+  ctx.fillStyle = "#222";
+  ctx.fillRect(2.5, -13, 2, 2);
+
+  const localAim = facing === 1 ? p.aim : Math.PI - p.aim;
+  ctx.save();
+  ctx.translate(1, -3);
+  ctx.rotate(localAim);
+  ctx.fillStyle = shirt;
+  ctx.fillRect(0, -2, 5, 4);
+  ctx.fillStyle = skin;
+  ctx.fillRect(5, -1.5, 5, 3);
+  ctx.fillStyle = "#263238";
+  ctx.fillRect(9, -2.5, 10, 4);
+  ctx.fillRect(9, 0.5, 3, 4);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawZombie(e) {
+  const facing = player.x >= e.x ? 1 : -1;
+  const swing = Math.sin(e.walk) * 3;
+  const bob = Math.abs(Math.sin(e.walk)) * 1.5;
+  const sway = Math.sin(e.walk * 0.5) * 1.2;
+
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  ctx.scale(e.r / 12, e.r / 12);
+  shadow(13, 9);
+  ctx.scale(facing, 1);
+  ctx.translate(0, -bob);
+
+  ctx.fillStyle = e.pants;
+  ctx.fillRect(-5 + swing * 0.5, 3, 4, 10);
+  ctx.fillRect(1 - swing * 0.5, 3, 4, 10);
+
+  ctx.fillStyle = e.skin;
+  ctx.fillRect(0, -5 + sway, 12, 3);
+
+  ctx.fillStyle = e.shirt;
+  ctx.beginPath();
+  ctx.moveTo(-6, -6);
+  ctx.lineTo(6, -6);
+  ctx.lineTo(6, 4);
+  ctx.lineTo(4, 6);
+  ctx.lineTo(2, 4);
+  ctx.lineTo(0, 6);
+  ctx.lineTo(-2, 4);
+  ctx.lineTo(-4, 6);
+  ctx.lineTo(-6, 4);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = e.skin;
+  ctx.fillRect(1, -2 - sway, 12, 3);
+
+  ctx.save();
+  ctx.translate(1, -11);
+  ctx.rotate(0.25);
+  circle(0, 0, 6, e.skin);
+  ctx.fillStyle = "#1b1b1b";
+  ctx.fillRect(-5, -6, 3, 2);
+  ctx.fillRect(-1, -7, 2, 2);
+  ctx.fillRect(2, -6, 2, 2);
+  ctx.shadowColor = "#ff1744";
+  ctx.shadowBlur = 6;
+  circle(2.5, -1, 1.4, "#ff1744");
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(1, 2, 4, 1.5);
+  ctx.restore();
+
+  ctx.restore();
+
+  if (e.flash > 0) circle(e.x, e.y - e.r * 0.3, e.r * 1.1, "rgba(255, 255, 255, 0.55)");
+
+  if (e.maxHp > 1 && e.hp < e.maxHp) {
+    const w = e.r * 2;
+    const y = e.y - e.r * 2;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(e.x - w / 2, y, w, 4);
+    ctx.fillStyle = "#e53935";
+    ctx.fillRect(e.x - w / 2, y, w * (e.hp / e.maxHp), 4);
   }
 }
 
@@ -741,7 +879,7 @@ function gameOver() {
   running = false;
   overlay.innerHTML = `
     <h1>Game Over</h1>
-    <p>You destroyed ${score} points worth of balls in ${elapsed.toFixed(1)}s.</p>
+    <p>The zombies got you after ${elapsed.toFixed(1)}s. You scored ${score} points.</p>
     <button id="start">Play again</button>`;
   overlay.classList.remove("hidden");
   document.getElementById("start").addEventListener("click", start);
