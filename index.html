@@ -49,11 +49,12 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span></div>
+<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
   <h1>Ball Defender</h1>
   <p>Your ball shoots automatically.</p>
   <p>Move with WASD or the arrow keys and survive as long as you can.</p>
+  <p>Grab the purple bonuses to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
 
@@ -62,6 +63,7 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const scoreEl = document.getElementById("score");
 const livesEl = document.getElementById("lives");
+const shotsEl = document.getElementById("shots");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("start");
 
@@ -77,22 +79,46 @@ const keys = {};
 window.addEventListener("keydown", e => (keys[e.key.toLowerCase()] = true));
 window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
 
-let player, bullets, enemies, particles, score, lives, elapsed;
+const MAX_SHOTS = 7;
+const BONUS_DURATION = 10;
+const BONUS_LIFETIME = 8;
+
+let player, bullets, enemies, particles, bonuses, score, lives, elapsed;
 let shootTimer, spawnTimer, invulnerable, running = false, lastTime = 0;
+let shots, shotsTimer, bonusTimer;
 
 function reset() {
   player = { x: W / 2, y: H / 2, r: 18, speed: 260 };
   bullets = [];
   enemies = [];
   particles = [];
+  bonuses = [];
   score = 0;
   lives = 3;
   elapsed = 0;
   shootTimer = 0;
   spawnTimer = 0;
   invulnerable = 0;
+  shots = 1;
+  shotsTimer = 0;
+  bonusTimer = 6;
   scoreEl.textContent = score;
   livesEl.textContent = lives;
+  updateShotsHud();
+}
+
+function updateShotsHud() {
+  shotsEl.textContent = shots > 1 ? `x${shots} (${Math.ceil(shotsTimer)}s)` : "x1";
+}
+
+function spawnBonus() {
+  const pad = 60;
+  bonuses.push({
+    x: pad + Math.random() * (W - pad * 2),
+    y: pad + Math.random() * (H - pad * 2),
+    r: 14,
+    life: BONUS_LIFETIME,
+  });
 }
 
 function spawnEnemy() {
@@ -123,15 +149,19 @@ function nearestEnemy() {
 function shoot() {
   const target = nearestEnemy();
   if (!target) return;
-  const angle = Math.atan2(target.y - player.y, target.x - player.x);
+  const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
   const speed = 600;
-  bullets.push({
-    x: player.x,
-    y: player.y,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-    r: 5,
-  });
+  const spread = 0.15;
+  for (let i = 0; i < shots; i++) {
+    const angle = baseAngle + (i - (shots - 1) / 2) * spread;
+    bullets.push({
+      x: player.x,
+      y: player.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      r: 5,
+    });
+  }
 }
 
 function explode(x, y, color, count = 14) {
@@ -172,6 +202,32 @@ function update(dt) {
     for (let i = 0; i < count; i++) spawnEnemy();
     spawnTimer = spawnInterval;
   }
+
+  bonusTimer -= dt;
+  if (bonusTimer <= 0) {
+    spawnBonus();
+    bonusTimer = 8 + Math.random() * 4;
+  }
+
+  for (const bonus of bonuses) {
+    bonus.life -= dt;
+    if ((bonus.x - player.x) ** 2 + (bonus.y - player.y) ** 2 < (bonus.r + player.r) ** 2) {
+      bonus.life = 0;
+      shots = Math.min(MAX_SHOTS, shots + 1);
+      shotsTimer = BONUS_DURATION;
+      explode(bonus.x, bonus.y, "#b388ff", 20);
+    }
+  }
+  bonuses = bonuses.filter(b => b.life > 0);
+
+  if (shots > 1) {
+    shotsTimer -= dt;
+    if (shotsTimer <= 0) {
+      shots--;
+      shotsTimer = shots > 1 ? BONUS_DURATION : 0;
+    }
+  }
+  updateShotsHud();
 
   for (const b of bullets) {
     b.x += b.vx * dt;
@@ -247,6 +303,25 @@ function draw() {
     circle(p.x, p.y, 3, p.color);
   }
   ctx.globalAlpha = 1;
+
+  for (const bonus of bonuses) {
+    const fading = bonus.life < 2 && Math.floor(bonus.life * 8) % 2 === 0;
+    if (fading) continue;
+    const pulse = 1 + Math.sin(elapsed * 6) * 0.12;
+    const r = bonus.r * pulse;
+    ctx.shadowColor = "#b388ff";
+    ctx.shadowBlur = 20;
+    circle(bonus.x, bonus.y, r, "#7c4dff");
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bonus.x - r * 0.5, bonus.y);
+    ctx.lineTo(bonus.x + r * 0.5, bonus.y);
+    ctx.moveTo(bonus.x, bonus.y - r * 0.5);
+    ctx.lineTo(bonus.x, bonus.y + r * 0.5);
+    ctx.stroke();
+  }
 
   for (const e of enemies) {
     circle(e.x, e.y, e.r, e.color);
