@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cowboy Run</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #2b1a0a;
+    font-family: Georgia, "Times New Roman", serif;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 24px;
+    color: #f3e5ab;
+    background: rgba(40, 22, 8, 0.75);
+    text-align: center;
+  }
+  #overlay h1 {
+    font-size: 52px;
+    margin: 0 0 12px;
+    color: #f3c76b;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    text-shadow: 3px 3px 0 #5e3d22;
+  }
+  #overlay p { font-size: 18px; margin: 6px 0; opacity: 0.9; }
+  #overlay button {
+    margin-top: 20px;
+    padding: 12px 36px;
+    font-family: inherit;
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    border: 3px solid #5e3d22;
+    border-radius: 6px;
+    background: #c8862e;
+    color: #2b1a0a;
+    cursor: pointer;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="overlay">
+  <h1>Cowboy Run</h1>
+  <p>Ride through the zombie-infested frontier and reach the saloon at the end of the trail.</p>
+  <p>Move: A / D or arrow keys &nbsp;&middot;&nbsp; Jump: Space, W or Up &nbsp;&middot;&nbsp; Shoot: J or X</p>
+  <p>Stomp or shoot the zombies, grab coins, and hit the ? blocks from below. Mind the cacti and the pits.</p>
+  <p>M mutes all sound, N turns the music on or off.</p>
+  <button id="start">Play</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+
+const TILE = 40;
+const ROWS = 15;
+const GROUND_ROW = 12;
+const GRAVITY = 2000;
+const MAX_FALL = 900;
+const RUN_ACCEL = 1800;
+const MAX_RUN = 250;
+const FRICTION = 1800;
+const AIR_CONTROL = 0.65;
+const JUMP_SPEED = 740;
+const JUMP_CUT = 260;
+const COYOTE_TIME = 0.1;
+const JUMP_BUFFER = 0.12;
+const STOMP_BOUNCE = 480;
+const SHOOT_COOLDOWN = 0.28;
+const BULLET_SPEED = 750;
+const BULLET_RANGE = 520;
+const ZOMBIE_SPEED = 45;
+const START_HEARTS = 3;
+const MAX_HEARTS = 5;
+const INVULNERABLE_TIME = 1.5;
+const SOLID = new Set(["G", "C", "?", "S", "U"]);
+
+const MIN_VIEW_TILES = 18;
+
+let W, H, scale, viewW, viewH, worldTop;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  scale = Math.min(H / (ROWS * TILE), W / (MIN_VIEW_TILES * TILE));
+  viewW = W / scale;
+  viewH = H / scale;
+  worldTop = viewH - ROWS * TILE;
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---------- Input ----------
+
+const keys = {};
+const JUMP_KEYS = [" ", "w", "arrowup", "k"];
+const SHOOT_KEYS = ["j", "x"];
+const held = list => list.some(k => keys[k]);
+
+window.addEventListener("keydown", e => {
+  const key = e.key.toLowerCase();
+  if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) e.preventDefault();
+  if (!e.repeat) {
+    if (JUMP_KEYS.includes(key)) jumpBuffer = JUMP_BUFFER;
+    if (key === "m") toggleSound();
+    if (key === "n") toggleMusic();
+    if (key === "enter" && !running) start();
+  }
+  keys[key] = true;
+});
+window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
+
+// ---------- Sound ----------
+// Everything is synthesized with the Web Audio API. Browsers only allow audio to
+// start after a user gesture, so the context is created when Play is clicked.
+
+const MASTER_VOLUME = 0.35;
+const MUSIC_VOLUME = 0.5;
+const SHOT_VOLUME = 0.4;
+
+let audio = null, master = null, noiseBuffer = null, muted = false;
+let musicGain = null, echoIn = null, musicOn = true;
+
+function initAudio() {
+  if (!audio) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    audio = new AudioCtx();
+    master = audio.createGain();
+    master.gain.value = muted ? 0 : MASTER_VOLUME;
+    master.connect(audio.destination);
+    noiseBuffer = audio.createBuffer(1, Math.floor(audio.sampleRate * 0.3), audio.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+    musicGain = audio.createGain();
+    musicGain.gain.value = musicOn ? MUSIC_VOLUME : 0;
+    musicGain.connect(master);
+    echoIn = audio.createGain();
+    const delay = audio.createDelay(1);
+    delay.delayTime.value = 0.33;
+    const feedback = audio.createGain();
+    feedback.gain.value = 0.32;
+    const wet = audio.createGain();
+    wet.gain.value = 0.3;
+    echoIn.connect(delay);
+    delay.connect(feedback).connect(delay);
+    delay.connect(wet).connect(musicGain);
+  }
+  if (audio.state === "suspended") audio.resume();
+  startMusic();
+}
+
+function toggleSound() {
+  muted = !muted;
+  if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER_VOLUME, audio.currentTime, 0.02);
+}
+
+function toggleMusic() {
+  musicOn = !musicOn;
+  if (musicGain) musicGain.gain.setTargetAtTime(musicOn ? MUSIC_VOLUME : 0, audio.currentTime, 0.05);
+}
+
+function soundReady() {
+  return audio && !muted && audio.state === "running";
+}
+
+function tone(f0, f1, duration, type, volume, delay = 0) {
+  if (!soundReady()) return;
+  const t = audio.currentTime + delay;
+  const osc = audio.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f0, t);
+  osc.frequency.exponentialRampToValueAtTime(f1, t + duration);
+  const env = audio.createGain();
+  env.gain.setValueAtTime(volume, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+  osc.connect(env).connect(master);
+  osc.start(t);
+  osc.stop(t + duration + 0.01);
+}
+
+const sfx = {
+  jump: () => tone(300, 720, 0.15, "square", 0.05),
+  coin: () => { tone(988, 988, 0.08, "square", 0.05); tone(1319, 1319, 0.25, "square", 0.05, 0.08); },
+  stomp: () => { tone(260, 60, 0.15, "triangle", 0.45); tone(900, 200, 0.05, "square", 0.04); },
+  bump: () => tone(160, 80, 0.09, "triangle", 0.35),
+  hurt: () => tone(520, 110, 0.4, "sawtooth", 0.08),
+  powerup: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.12, "square", 0.045, i * 0.07)),
+  fanfare: () => [392, 523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(f, f, i === 6 ? 0.6 : 0.14, "square", 0.05, i * 0.13)),
+  zombieDown: () => tone(180, 50, 0.25, "sawtooth", 0.06),
+};
+
+function playShot() {
+  if (!soundReady()) return;
+  const t = audio.currentTime;
+  const crack = audio.createBufferSource();
+  crack.buffer = noiseBuffer;
+  crack.playbackRate.value = 0.85 + Math.random() * 0.3;
+  const band = audio.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 1600 + Math.random() * 800;
+  band.Q.value = 0.7;
+  const crackGain = audio.createGain();
+  crackGain.gain.setValueAtTime(0.0001, t);
+  crackGain.gain.exponentialRampToValueAtTime(0.6 * SHOT_VOLUME, t + 0.003);
+  crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+  crack.connect(band).connect(crackGain).connect(master);
+  crack.start(t);
+  crack.stop(t + 0.16);
+
+  const thump = audio.createOscillator();
+  thump.type = "triangle";
+  thump.frequency.setValueAtTime(170 + Math.random() * 30, t);
+  thump.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+  const thumpGain = audio.createGain();
+  thumpGain.gain.setValueAtTime(0.5 * SHOT_VOLUME, t);
+  thumpGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  thump.connect(thumpGain).connect(master);
+  thump.start(t);
+  thump.stop(t + 0.13);
+}
+
+// ---------- Music ----------
+// An original western tune in A minor on a 16th-note grid: a whistled melody with
+// vibrato and echo, a "boom-chick" guitar, and galloping hoof clip-clops.
+
+const MUSIC_STEP = 60 / 116 / 4;
+const STEPS_PER_BAR = 16;
+
+const CHORDS = {
+  Am: { bass: ["A2", "E2"], strum: ["A3", "C4", "E4"] },
+  G: { bass: ["G2", "D3"], strum: ["G3", "B3", "D4"] },
+  F: { bass: ["F2", "C3"], strum: ["F3", "A3", "C4"] },
+  E: { bass: ["E2", "B2"], strum: ["E3", "G#3", "B3"] },
+  Dm: { bass: ["D3", "A2"], strum: ["D3", "F3", "A3"] },
+};
+
+// Each bar: [chord, [[startStep, note, lengthInSteps], ...]]
+const SONG = [
+  ["Am", [[0, "E5", 6], [6, "A5", 2], [8, "B5", 2], [10, "C6", 6]]],
+  ["Am", [[0, "B5", 2], [2, "A5", 2], [4, "E5", 12]]],
+  ["G", [[0, "D5", 6], [6, "G5", 2], [8, "A5", 2], [10, "B5", 6]]],
+  ["G", [[0, "A5", 2], [2, "G5", 2], [4, "D5", 12]]],
+  ["F", [[0, "C5", 4], [4, "F5", 4], [8, "A5", 4], [12, "C6", 4]]],
+  ["F", [[0, "B5", 4], [4, "A5", 4], [8, "F5", 8]]],
+  ["E", [[0, "E5", 4], [4, "G#5", 4], [8, "B5", 4], [12, "D6", 4]]],
+  ["E", [[0, "C6", 2], [2, "B5", 2], [4, "G#5", 4], [8, "E5", 8]]],
+  ["Am", [[0, "A5", 3], [3, "C6", 3], [6, "E6", 10]]],
+  ["Dm", [[0, "D6", 4], [4, "C6", 2], [6, "A5", 2], [8, "F5", 8]]],
+  ["Am", [[0, "E5", 4], [4, "A5", 4], [8, "C6", 4], [12, "B5", 4]]],
+  ["E", [[0, "G#5", 8], [8, "E5", 8]]],
+  ["Am", [[0, "A5", 3], [3, "C6", 3], [6, "E6", 6], [12, "D6", 4]]],
+  ["Dm", [[0, "C6", 4], [4, "A5", 4], [8, "F5", 4], [12, "D5", 4]]],
+  ["E", [[0, "E5", 4], [4, "G#5", 4], [8, "B5", 4], [12, "G#5", 4]]],
+  ["Am", [[0, "A5", 12]]],
+];
+const HOOVES = [0.55, 0, 0.4, 0.8];
+
+let musicStep = 0, nextStepTime = 0, musicTimer = null;
+
+function noteFreq(name) {
+  const [, letter, accidental, octave] = name.match(/^([A-G])(#|b)?(\d)$/);
+  const semis = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[letter] + (accidental === "#" ? 1 : accidental === "b" ? -1 : 0);
+  const midi = (Number(octave) + 1) * 12 + semis;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function startMusic() {
+  if (!audio || musicTimer) return;
+  nextStepTime = audio.currentTime + 0.1;
+  musicTimer = setInterval(scheduleMusic, 25);
+}
+
+function scheduleMusic() {
+  if (audio.state !== "running") return;
+  if (nextStepTime < audio.currentTime - 0.05) nextStepTime = audio.currentTime + 0.05;
+  while (nextStepTime < audio.currentTime + 0.2) {
+    playMusicStep(musicStep, nextStepTime);
+    nextStepTime += MUSIC_STEP;
+    musicStep = (musicStep + 1) % (SONG.length * STEPS_PER_BAR);
+  }
+}
+
+function playMusicStep(step, t) {
+  const [chordName, melody] = SONG[Math.floor(step / STEPS_PER_BAR)];
+  const chord = CHORDS[chordName];
+  const s = step % STEPS_PER_BAR;
+  for (const [start, note, length] of melody) {
+    if (start === s) whistle(noteFreq(note), t, length * MUSIC_STEP);
+  }
+  if (s === 0) pluck(noteFreq(chord.bass[0]), t, 0.4);
+  if (s === 8) pluck(noteFreq(chord.bass[1]), t, 0.35);
+  if (s === 4 || s === 12) chord.strum.forEach((n, i) => strum(noteFreq(n), t + i * 0.012));
+  const hoof = HOOVES[s % 4];
+  if (hoof) clipClop(t, hoof, s % 8 < 4);
+}
+
+function whistle(freq, t, duration) {
+  const osc = audio.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const vibrato = audio.createOscillator();
+  vibrato.frequency.value = 5.5;
+  const vibratoDepth = audio.createGain();
+  vibratoDepth.gain.setValueAtTime(0, t);
+  vibratoDepth.gain.linearRampToValueAtTime(freq * 0.012, t + Math.min(0.2, duration));
+  vibrato.connect(vibratoDepth).connect(osc.frequency);
+  const env = audio.createGain();
+  const end = t + duration;
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.22, t + 0.04);
+  env.gain.setValueAtTime(0.22, Math.max(t + 0.04, end - 0.06));
+  env.gain.exponentialRampToValueAtTime(0.0001, end + 0.04);
+  osc.connect(env);
+  env.connect(musicGain);
+  env.connect(echoIn);
+  osc.start(t);
+  vibrato.start(t);
+  osc.stop(end + 0.05);
+  vibrato.stop(end + 0.05);
+}
+
+function pluck(freq, t, volume) {
+  const osc = audio.createOscillator();
+  osc.type = "triangle";
+  osc.frequency.value = freq;
+  const env = audio.createGain();
+  env.gain.setValueAtTime(volume, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+  osc.connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.46);
+}
+
+function strum(freq, t) {
+  const osc = audio.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.value = freq;
+  const tone = audio.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.frequency.setValueAtTime(2200, t);
+  tone.frequency.exponentialRampToValueAtTime(500, t + 0.15);
+  const env = audio.createGain();
+  env.gain.setValueAtTime(0.06, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  osc.connect(tone).connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.2);
+}
+
+function clipClop(t, volume, high) {
+  const osc = audio.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(high ? 1100 : 850, t);
+  osc.frequency.exponentialRampToValueAtTime(high ? 700 : 520, t + 0.04);
+  const env = audio.createGain();
+  env.gain.setValueAtTime(0.18 * volume, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  osc.connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.06);
+}
+
+// ---------- Level ----------
+// Tiles: G ground, C crate, ? coin block, S star block (looks like ?), U used block,
+// = one-way wooden ledge, ^ cactus. Coins, zombies, checkpoints and the flag are
+// pulled out of the grid into object lists.
+
+function buildLevel() {
+  const width = 180;
+  const grid = Array.from({ length: ROWS }, () => Array(width).fill("."));
+  const set = (x, y, ch) => { if (x >= 0 && x < width && y >= 0 && y < ROWS) grid[y][x] = ch; };
+  const ground = (x0, x1, top = GROUND_ROW) => {
+    for (let x = x0; x <= x1; x++) for (let y = top; y < ROWS; y++) set(x, y, "G");
+  };
+  const row = (x0, x1, y, ch) => { for (let x = x0; x <= x1; x++) set(x, y, ch); };
+  const column = (x, y0, y1, ch) => { for (let y = y0; y <= y1; y++) set(x, y, ch); };
+
+  const level = {
+    width,
+    grid,
+    start: { x: 3, y: 11 },
+    coins: [],
+    zombies: [],
+    checkpoints: [],
+    flag: { x: 172 },
+    buildings: [
+      { x: 86, w: 5, h: 6, color: "#9a6438", sign: "SALOON", saloon: true },
+      { x: 92, w: 4, h: 5, color: "#7e5a3c", sign: "BANK" },
+      { x: 97, w: 5, h: 4, color: "#a0703f", sign: "HOTEL" },
+      { x: 103, w: 4, h: 5, color: "#8a5232", sign: "SHERIFF" },
+      { x: 108, w: 5, h: 4, color: "#76563a", sign: "JAIL" },
+      { x: 174, w: 5, h: 7, color: "#9a6438", sign: "SALOON", saloon: true },
+    ],
+    fences: [[36, 39], [55, 57], [152, 154]],
+  };
+  const coin = (x, y) => level.coins.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE / 2, taken: false, phase: Math.random() * 6 });
+  const coins = (x0, x1, y) => { for (let x = x0; x <= x1; x++) coin(x, y); };
+  const zombie = (x, y, big = false) => level.zombies.push({ x, y, big });
+
+  ground(0, 25);
+  coins(7, 9, 9);
+  row(15, 19, 8, "C");
+  set(16, 8, "?");
+  set(18, 8, "?");
+  set(17, 4, "S");
+  zombie(22, 11);
+
+  ground(29, 50);
+  set(33, 11, "^");
+  row(40, 43, 9, "=");
+  coins(40, 43, 8);
+  zombie(45, 11);
+  ground(47, 50, 10);
+  coins(48, 49, 8);
+  zombie(49, 9);
+
+  ground(54, 79);
+  for (let i = 0; i < 4; i++) column(58 + i, 11 - i, 11, "C");
+  row(62, 63, 10, "C");
+  row(62, 63, 11, "C");
+  coins(62, 63, 9);
+  for (let i = 0; i < 4; i++) column(64 + i, 8 + i, 11, "C");
+  level.checkpoints.push({ x: 69, y: 11, lit: false });
+  set(72, 8, "?");
+  set(73, 8, "S");
+  set(74, 8, "?");
+  zombie(77, 11, true);
+
+  row(81, 82, 9, "=");
+
+  ground(84, 117);
+  zombie(90, 11);
+  zombie(96, 11);
+  row(99, 103, 8, "C");
+  set(100, 8, "?");
+  set(102, 8, "?");
+  row(100, 102, 5, "=");
+  coins(100, 102, 4);
+  zombie(106, 11, true);
+  coins(108, 110, 9);
+  zombie(112, 11);
+  set(114, 11, "^");
+
+  ground(121, 126);
+  ground(127, 132, 10);
+  ground(133, 139, 8);
+  coins(134, 138, 6);
+  zombie(136, 7);
+
+  ground(140, 146);
+  level.checkpoints.push({ x: 142, y: 11, lit: false });
+  set(145, 11, "^");
+
+  row(148, 149, 10, "=");
+
+  ground(151, 179);
+  zombie(155, 11);
+  zombie(159, 11, true);
+  for (let i = 0; i < 5; i++) column(163 + i, 11 - i, 11, "C");
+
+  return level;
+}
+
+function tileAt(tx, ty) {
+  if (tx < 0 || tx >= level.width) return "G";
+  if (ty < 0 || ty >= ROWS) return ".";
+  return level.grid[ty][tx];
+}
+
+function hash(a, b) {
+  let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// ---------- Physics ----------
+
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function moveEntity(e, dt, onHeadHit) {
+  e.hitWall = false;
+  e.x += e.vx * dt;
+  if (e.vx !== 0) {
+    const right = e.vx > 0;
+    const tx = Math.floor((right ? e.x + e.w - 0.001 : e.x) / TILE);
+    for (let ty = Math.floor(e.y / TILE); ty <= Math.floor((e.y + e.h - 0.001) / TILE); ty++) {
+      if (SOLID.has(tileAt(tx, ty))) {
+        e.x = right ? tx * TILE - e.w : (tx + 1) * TILE;
+        e.vx = 0;
+        e.hitWall = true;
+        break;
+      }
+    }
+  }
+
+  const prevBottom = e.y + e.h;
+  e.y += e.vy * dt;
+  e.onGround = false;
+  const tx0 = Math.floor(e.x / TILE), tx1 = Math.floor((e.x + e.w - 0.001) / TILE);
+  if (e.vy > 0) {
+    const ty = Math.floor((e.y + e.h - 0.001) / TILE);
+    for (let tx = tx0; tx <= tx1; tx++) {
+      const ch = tileAt(tx, ty);
+      if (SOLID.has(ch) || (ch === "=" && prevBottom <= ty * TILE + 0.5)) {
+        e.y = ty * TILE - e.h;
+        e.vy = 0;
+        e.onGround = true;
+        break;
+      }
+    }
+  } else if (e.vy < 0) {
+    const ty = Math.floor(e.y / TILE);
+    const hits = [];
+    for (let tx = tx0; tx <= tx1; tx++) if (SOLID.has(tileAt(tx, ty))) hits.push(tx);
+    if (hits.length) {
+      e.y = (ty + 1) * TILE;
+      e.vy = 0;
+      if (onHeadHit) {
+        const center = (e.x + e.w / 2) / TILE;
+        hits.sort((a, b) => Math.abs(a + 0.5 - center) - Math.abs(b + 0.5 - center));
+        onHeadHit(hits[0], ty);
+      }
+    }
+  }
+}
+
+// ---------- Game state ----------
+
+let level, player, zombies, bullets, particles, popups, stars, bumps, flyingCoins;
+let camX = 0, elapsed = 0, score = 0, coinCount = 0, hearts = START_HEARTS;
+let checkpoint, running = false, won = false, winTimer = 0, lastTime = 0;
+let jumpBuffer = 0;
+
+function reset() {
+  level = buildLevel();
+  player = {
+    x: 0, y: 0, w: 22, h: 40, vx: 0, vy: 0,
+    facing: 1, onGround: false, coyote: 0, walk: 0,
+    shootCooldown: 0, shootTimer: 0, invulnerable: 0,
+  };
+  checkpoint = level.start;
+  respawn();
+  zombies = level.zombies.map(z => {
+    const w = z.big ? 26 : 22, h = z.big ? 44 : 36;
+    return {
+      x: z.x * TILE + (TILE - w) / 2, y: (z.y + 1) * TILE - h, w, h,
+      vx: 0, vy: 0, dir: -1, hp: z.big ? 2 : 1, big: z.big,
+      active: false, dead: false, squash: 0, flash: 0,
+      walk: Math.random() * 6,
+      skin: `hsl(${75 + Math.random() * 35}, 38%, ${40 + Math.random() * 10}%)`,
+      shirt: pick(["#5d4037", "#455a64", "#6a1b9a", "#33691e", "#78909c", "#8d6e63", "#7f1d1d"]),
+      pants: pick(["#3e2723", "#263238", "#37474f", "#4e342e"]),
+      hat: Math.random() < 0.5 ? pick(["#4e342e", "#3b2a1e", "#6d5a45", "#2b2b2b"]) : null,
+    };
+  });
+  bullets = [];
+  particles = [];
+  popups = [];
+  stars = [];
+  bumps = [];
+  flyingCoins = [];
+  elapsed = 0;
+  score = 0;
+  coinCount = 0;
+  hearts = START_HEARTS;
+  won = false;
+  winTimer = 0;
+  jumpBuffer = 0;
+  camX = 0;
+}
+
+function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function respawn() {
+  player.x = checkpoint.x * TILE + (TILE - player.w) / 2;
+  player.y = (checkpoint.y + 1) * TILE - player.h;
+  player.vx = 0;
+  player.vy = 0;
+  player.invulnerable = INVULNERABLE_TIME;
+  camX = Math.max(0, player.x - viewW * 0.4);
+}
+
+function addScore(points, x, y) {
+  score += points;
+  popups.push({ x, y, text: String(points), life: 0.8 });
+}
+
+function explode(x, y, color, count = 14, gravity = 0) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 60 + Math.random() * 200;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.6, color, gravity });
+  }
+}
+
+function hitBlock(tx, ty) {
+  const ch = level.grid[ty][tx];
+  bumps.push({ tx, ty, t: 0 });
+  if (ch === "?") {
+    level.grid[ty][tx] = "U";
+    coinCount++;
+    flyingCoins.push({ x: tx * TILE + TILE / 2, y: ty * TILE, vy: -520, life: 0.45 });
+    addScore(100, tx * TILE + TILE / 2, ty * TILE - 20);
+    sfx.coin();
+  } else if (ch === "S") {
+    level.grid[ty][tx] = "U";
+    stars.push({ x: tx * TILE + 6, y: ty * TILE + 6, w: 28, h: 28, baseY: (ty - 1) * TILE + 6, rise: 0, t: 0 });
+    sfx.powerup();
+  } else {
+    sfx.bump();
+  }
+  for (const z of zombies) {
+    if (z.dead) continue;
+    const standingOn = Math.abs(z.y + z.h - ty * TILE) < 2 && z.x + z.w > tx * TILE && z.x < (tx + 1) * TILE;
+    if (standingOn) killZombie(z, false);
+  }
+}
+
+function killZombie(z, stomped) {
+  z.dead = true;
+  if (stomped) {
+    z.squash = 0.5;
+    addScore(200, z.x + z.w / 2, z.y);
+    sfx.stomp();
+  } else {
+    z.squash = 0;
+    explode(z.x + z.w / 2, z.y + z.h / 2, z.skin, 12, 600);
+    explode(z.x + z.w / 2, z.y + z.h / 2, "#8e0000", 6, 600);
+    addScore(100, z.x + z.w / 2, z.y);
+    sfx.zombieDown();
+  }
+}
+
+function hurt(fromX) {
+  if (player.invulnerable > 0 || won) return;
+  hearts--;
+  sfx.hurt();
+  explode(player.x + player.w / 2, player.y + player.h / 2, "#ff5252", 16);
+  if (hearts <= 0) return gameOver();
+  player.invulnerable = INVULNERABLE_TIME;
+  player.vy = -380;
+  player.vx = (player.x + player.w / 2 < fromX ? -1 : 1) * 220;
+}
+
+function fellInPit() {
+  hearts--;
+  sfx.hurt();
+  if (hearts <= 0) return gameOver();
+  respawn();
+}
+
+// ---------- Update ----------
+
+function updatePlayer(dt) {
+  const p = player;
+  const dir = (keys["d"] || keys["arrowright"] ? 1 : 0) - (keys["a"] || keys["arrowleft"] ? 1 : 0);
+
+  if (dir) {
+    const turning = Math.sign(p.vx) === -dir;
+    const accel = RUN_ACCEL * (p.onGround ? 1 : AIR_CONTROL) * (turning ? 1.8 : 1);
+    p.vx = Math.max(-MAX_RUN, Math.min(MAX_RUN, p.vx + dir * accel * dt));
+    p.facing = dir;
+  } else if (p.onGround) {
+    const slow = FRICTION * dt;
+    p.vx = Math.abs(p.vx) <= slow ? 0 : p.vx - Math.sign(p.vx) * slow;
+  }
+
+  p.coyote = p.onGround ? COYOTE_TIME : p.coyote - dt;
+  jumpBuffer -= dt;
+  if (jumpBuffer > 0 && p.coyote > 0) {
+    p.vy = -JUMP_SPEED;
+    p.coyote = 0;
+    jumpBuffer = 0;
+    sfx.jump();
+  }
+  if (!held(JUMP_KEYS) && p.vy < -JUMP_CUT) p.vy = -JUMP_CUT;
+  p.vy = Math.min(MAX_FALL, p.vy + GRAVITY * dt);
+
+  p.shootCooldown -= dt;
+  p.shootTimer -= dt;
+  if (held(SHOOT_KEYS) && p.shootCooldown <= 0) {
+    p.shootCooldown = SHOOT_COOLDOWN;
+    p.shootTimer = 0.18;
+    bullets.push({ x: p.x + p.w / 2 + p.facing * 20, y: p.y + 15, vx: p.facing * BULLET_SPEED, dist: 0 });
+    playShot();
+  }
+
+  moveEntity(p, dt, hitBlock);
+  if (p.onGround && Math.abs(p.vx) > 20) p.walk += dt * Math.abs(p.vx) / 18;
+  if (p.invulnerable > 0) p.invulnerable -= dt;
+
+  if (p.y > ROWS * TILE + 60) return fellInPit();
+
+  const tx0 = Math.floor(p.x / TILE), tx1 = Math.floor((p.x + p.w) / TILE);
+  const ty0 = Math.floor(p.y / TILE), ty1 = Math.floor((p.y + p.h) / TILE);
+  for (let ty = ty0; ty <= ty1; ty++) {
+    for (let tx = tx0; tx <= tx1; tx++) {
+      if (tileAt(tx, ty) !== "^") continue;
+      const cactus = { x: tx * TILE + 10, y: ty * TILE + 6, w: TILE - 20, h: TILE - 6 };
+      if (overlaps(p, cactus)) hurt(cactus.x + cactus.w / 2);
+    }
+  }
+
+  for (const c of level.coins) {
+    if (c.taken) continue;
+    if (overlaps(p, { x: c.x - 10, y: c.y - 12, w: 20, h: 24 })) {
+      c.taken = true;
+      coinCount++;
+      score += 50;
+      sfx.coin();
+    }
+  }
+
+  for (const s of stars) {
+    if (s.taken || s.rise < 1) continue;
+    if (overlaps(p, s)) {
+      s.taken = true;
+      hearts = Math.min(MAX_HEARTS, hearts + 1);
+      addScore(1000, s.x + s.w / 2, s.y);
+      explode(s.x + s.w / 2, s.y + s.h / 2, "#ffca28", 20);
+      sfx.powerup();
+    }
+  }
+
+  for (const cp of level.checkpoints) {
+    if (!cp.lit && p.x > cp.x * TILE) {
+      cp.lit = true;
+      checkpoint = cp;
+      sfx.coin();
+    }
+  }
+
+  if (p.x + p.w > level.flag.x * TILE + 16) win();
+}
+
+function updateZombies(dt) {
+  for (const z of zombies) {
+    if (z.dead) {
+      z.squash -= dt;
+      continue;
+    }
+    if (!z.active) {
+      if (z.x < camX + viewW + 60) z.active = true;
+      else continue;
+    }
+    z.vx = z.dir * ZOMBIE_SPEED;
+    z.vy = Math.min(MAX_FALL, z.vy + GRAVITY * dt);
+    moveEntity(z, dt);
+    if (z.hitWall) z.dir *= -1;
+    if (z.onGround) {
+      const frontX = z.dir > 0 ? z.x + z.w + 1 : z.x - 1;
+      const below = tileAt(Math.floor(frontX / TILE), Math.floor((z.y + z.h + 1) / TILE));
+      if (!SOLID.has(below) && below !== "=") z.dir *= -1;
+    }
+    z.walk += dt * 5;
+    if (z.flash > 0) z.flash -= dt;
+    if (z.y > ROWS * TILE + 100) z.dead = true;
+  }
+
+  for (let i = 0; i < zombies.length; i++) {
+    const a = zombies[i];
+    if (a.dead || !a.active) continue;
+    for (let j = i + 1; j < zombies.length; j++) {
+      const b = zombies[j];
+      if (b.dead || !b.active || !overlaps(a, b)) continue;
+      if (a.x < b.x) { a.dir = -1; b.dir = 1; } else { a.dir = 1; b.dir = -1; }
+    }
+  }
+
+  for (const z of zombies) {
+    if (z.dead || !z.active || !overlaps(player, z) || won) continue;
+    const falling = player.vy > 0 && player.y + player.h - z.y < 18;
+    if (falling) {
+      killZombie(z, true);
+      player.vy = held(JUMP_KEYS) ? -JUMP_SPEED * 0.9 : -STOMP_BOUNCE;
+    } else {
+      hurt(z.x + z.w / 2);
+    }
+  }
+  zombies = zombies.filter(z => !z.dead || z.squash > 0);
+}
+
+function updateBullets(dt) {
+  for (const b of bullets) {
+    const step = b.vx * dt;
+    b.x += step;
+    b.dist += Math.abs(step);
+    if (b.dist > BULLET_RANGE) b.dead = true;
+    if (SOLID.has(tileAt(Math.floor(b.x / TILE), Math.floor(b.y / TILE)))) {
+      b.dead = true;
+      explode(b.x, b.y, "#fff59d", 4);
+    }
+    for (const z of zombies) {
+      if (b.dead || z.dead) continue;
+      if (b.x > z.x && b.x < z.x + z.w && b.y > z.y && b.y < z.y + z.h) {
+        b.dead = true;
+        z.hp--;
+        z.flash = 0.1;
+        if (z.hp <= 0) killZombie(z, false);
+      }
+    }
+  }
+  bullets = bullets.filter(b => !b.dead);
+}
+
+function updateEffects(dt) {
+  for (const p of particles) {
+    p.vy += p.gravity * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.95;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+
+  for (const t of popups) {
+    t.y -= 50 * dt;
+    t.life -= dt;
+  }
+  popups = popups.filter(t => t.life > 0);
+
+  for (const c of flyingCoins) {
+    c.vy += 1800 * dt;
+    c.y += c.vy * dt;
+    c.life -= dt;
+  }
+  flyingCoins = flyingCoins.filter(c => c.life > 0);
+
+  for (const b of bumps) b.t += dt;
+  bumps = bumps.filter(b => b.t < 0.15);
+
+  for (const s of stars) {
+    s.t += dt;
+    if (s.rise < 1) {
+      s.rise = Math.min(1, s.rise + dt * 2.5);
+      s.y = s.baseY + (1 - s.rise) * TILE;
+    } else {
+      s.y = s.baseY + Math.sin(s.t * 3) * 4;
+    }
+  }
+  stars = stars.filter(s => !s.taken);
+}
+
+function updateCamera(dt) {
+  const target = player.x + player.w / 2 - viewW * 0.4;
+  camX += (target - camX) * Math.min(1, dt * 8);
+  camX = Math.max(0, Math.min(level.width * TILE - viewW, camX));
+}
+
+function update(dt) {
+  elapsed += dt;
+  if (won) {
+    winTimer += dt;
+    player.vx = 0;
+    if (!player.onGround) {
+      player.vy = 220;
+      moveEntity(player, dt);
+    }
+    if (winTimer > 1.6) finish();
+  } else {
+    updatePlayer(dt);
+    if (!running) return;
+  }
+  updateZombies(dt);
+  if (!running) return;
+  updateBullets(dt);
+  updateEffects(dt);
+  updateCamera(dt);
+}
+
+// ---------- Drawing ----------
+
+function circle(x, y, r, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawBackground() {
+  const sky = ctx.createLinearGradient(0, 0, 0, viewH);
+  sky.addColorStop(0, "#f39a52");
+  sky.addColorStop(0.6, "#ffcf8a");
+  sky.addColorStop(1, "#ffe6b0");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, viewW, viewH);
+  ctx.translate(0, worldTop);
+
+  ctx.shadowColor = "#fff3c4";
+  ctx.shadowBlur = 40;
+  circle(viewW * 0.72 - camX * 0.02, 130, 48, "#fff1c1");
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "rgba(255, 245, 225, 0.75)";
+  const cloudOffset = camX * 0.08 + elapsed * 6;
+  for (let i = -1; i < Math.ceil(viewW / 420) + 2; i++) {
+    const seg = Math.floor(cloudOffset / 420) + i;
+    if (hash(seg, 7) < 0.4) continue;
+    const x = seg * 420 - cloudOffset + hash(seg, 8) * 200;
+    const y = 50 + hash(seg, 9) * 110;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 60, 14, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 30, y - 8, 34, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(x - 28, y - 4, 26, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawMesas(0.1, "#e0a073", 450, 120, 260, 260, 11);
+  drawMesas(0.25, "#c97c4f", 480, 60, 170, 200, 21);
+  drawCactusSilhouettes(0.45, "#a2603a", 500);
+  drawMesas(0.5, "#b56a41", 530, 10, 40, 160, 31);
+}
+
+function drawMesas(factor, color, base, minH, maxH, seg, salt) {
+  const off = camX * factor;
+  const first = Math.floor(off / seg) - 1;
+  const count = Math.ceil(viewW / seg) + 3;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-10, ROWS * TILE);
+  for (let i = first; i < first + count; i++) {
+    const x0 = i * seg - off, x1 = x0 + seg;
+    const tall = hash(i, salt) < 0.55;
+    const top = base - (tall ? minH + hash(i, salt + 1) * (maxH - minH) : minH * 0.25);
+    const inset = seg * 0.12;
+    ctx.lineTo(x0, base);
+    ctx.lineTo(x0 + inset, top);
+    ctx.lineTo(x1 - inset, top);
+    ctx.lineTo(x1, base);
+  }
+  ctx.lineTo(viewW + 10, ROWS * TILE);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawCactusSilhouettes(factor, color, base) {
+  const seg = 230;
+  const off = camX * factor;
+  ctx.fillStyle = color;
+  for (let i = Math.floor(off / seg) - 1; i < Math.floor(off / seg) + Math.ceil(viewW / seg) + 2; i++) {
+    if (hash(i, 41) > 0.5) continue;
+    const x = i * seg - off + hash(i, 42) * 120;
+    const h = 50 + hash(i, 43) * 50;
+    ctx.beginPath();
+    ctx.roundRect(x - 6, base - h, 12, h, 6);
+    ctx.roundRect(x - 20, base - h * 0.7, 8, h * 0.35, 4);
+    ctx.roundRect(x - 20, base - h * 0.45, 20, 7, 3);
+    ctx.roundRect(x + 12, base - h * 0.8, 8, h * 0.3, 4);
+    ctx.roundRect(x, base - h * 0.55, 20, 7, 3);
+    ctx.fill();
+  }
+}
+
+function drawBuilding(b) {
+  const x = b.x * TILE, w = b.w * TILE, h = b.h * TILE;
+  const groundY = GROUND_ROW * TILE, top = groundY - h;
+
+  ctx.fillStyle = b.color;
+  ctx.fillRect(x, top, w, h);
+  ctx.fillRect(x + w * 0.25, top - 16, w * 0.5, 16);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+  for (let y = top + 6; y < groundY; y += 8) ctx.fillRect(x, y, w, 1.5);
+  ctx.strokeStyle = "#4e3320";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x + 1.5, top + 1.5, w - 3, h - 3);
+
+  ctx.fillStyle = "#3e2a17";
+  ctx.fillRect(x + 12, top + 10, w - 24, 26);
+  ctx.font = "bold 16px Georgia, serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#f3e5ab";
+  ctx.fillText(b.sign, x + w / 2, top + 24);
+
+  const windowY = top + 48;
+  if (h > 4 * TILE) {
+    for (const wx of [x + 18, x + w - 42]) {
+      ctx.fillStyle = "#2a1d14";
+      ctx.fillRect(wx, windowY, 24, 30);
+      ctx.fillStyle = "rgba(255, 200, 120, 0.35)";
+      ctx.fillRect(wx + 2, windowY + 2, 20, 26);
+      ctx.fillStyle = "#4e3320";
+      ctx.fillRect(wx + 11, windowY, 2, 30);
+      ctx.fillRect(wx, windowY + 14, 24, 2);
+    }
+  }
+
+  const porchY = groundY - 72;
+  ctx.fillStyle = "#5e3d22";
+  ctx.fillRect(x - 6, porchY, w + 12, 8);
+  ctx.fillRect(x - 2, porchY, 5, 72);
+  ctx.fillRect(x + w - 3, porchY, 5, 72);
+
+  const doorX = x + w / 2 - 16;
+  ctx.fillStyle = "#24170e";
+  ctx.fillRect(doorX, groundY - 56, 32, 56);
+  if (b.saloon) {
+    ctx.fillStyle = "#b07a3e";
+    ctx.fillRect(doorX + 1, groundY - 44, 14, 24);
+    ctx.fillRect(doorX + 17, groundY - 44, 14, 24);
+    ctx.fillStyle = "#6b4421";
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(doorX + 1, groundY - 40 + i * 7, 14, 2);
+      ctx.fillRect(doorX + 17, groundY - 40 + i * 7, 14, 2);
+    }
+  }
+  ctx.fillStyle = "rgba(60, 30, 10, 0.18)";
+  ctx.fillRect(x - 6, top - 16, w + 12, h + 16);
+}
+
+function drawFence(x0, x1) {
+  const groundY = GROUND_ROW * TILE;
+  ctx.fillStyle = "#7a5230";
+  for (let x = x0 * TILE; x <= (x1 + 1) * TILE; x += 20) ctx.fillRect(x, groundY - 30, 5, 30);
+  ctx.fillRect(x0 * TILE, groundY - 26, (x1 - x0 + 1) * TILE + 5, 4);
+  ctx.fillRect(x0 * TILE, groundY - 14, (x1 - x0 + 1) * TILE + 5, 4);
+}
+
+function bumpOffset(tx, ty) {
+  const b = bumps.find(b => b.tx === tx && b.ty === ty);
+  return b ? -Math.sin((b.t / 0.15) * Math.PI) * 10 : 0;
+}
+
+function drawTile(ch, tx, ty) {
+  const x = tx * TILE, y = ty * TILE + (ch === "U" || ch === "C" || ch === "?" || ch === "S" ? bumpOffset(tx, ty) : 0);
+
+  if (ch === "G") {
+    const isTop = tileAt(tx, ty - 1) !== "G";
+    ctx.fillStyle = "#a0623a";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+    ctx.fillRect(x, y + 16, TILE, 3);
+    ctx.fillRect(x, y + 31, TILE, 2);
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = hash(tx * 7 + i, ty) < 0.5 ? "rgba(60, 30, 10, 0.3)" : "rgba(255, 220, 170, 0.25)";
+      ctx.fillRect(x + hash(tx, ty * 13 + i) * 36, y + hash(tx * 3 + i, ty) * 36, 3, 2);
+    }
+    if (isTop) {
+      ctx.fillStyle = "#e0b26a";
+      ctx.fillRect(x, y, TILE, 11);
+      ctx.fillStyle = "#c8944e";
+      for (let i = 0; i < 4; i++) ctx.fillRect(x + i * 10 + 2, y + 10, 6, 3);
+      ctx.fillStyle = "#f0c987";
+      ctx.fillRect(x, y, TILE, 2);
+    }
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    if (tileAt(tx - 1, ty) !== "G") ctx.fillRect(x, y, 3, TILE);
+    if (tileAt(tx + 1, ty) !== "G") ctx.fillRect(x + TILE - 3, y, 3, TILE);
+  } else if (ch === "C") {
+    ctx.fillStyle = "#b4783c";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.strokeStyle = "#7a4e26";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x + 5, y + 5); ctx.lineTo(x + TILE - 5, y + TILE - 5);
+    ctx.moveTo(x + TILE - 5, y + 5); ctx.lineTo(x + 5, y + TILE - 5);
+    ctx.stroke();
+    ctx.strokeStyle = "#6b4421";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+  } else if (ch === "?" || ch === "S") {
+    const glow = 0.85 + Math.sin(elapsed * 4) * 0.15;
+    ctx.fillStyle = "#e5a03a";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = "#f6c870";
+    ctx.fillRect(x, y, TILE, 3);
+    ctx.fillRect(x, y, 3, TILE);
+    ctx.fillStyle = "#a8681f";
+    ctx.fillRect(x, y + TILE - 3, TILE, 3);
+    ctx.fillRect(x + TILE - 3, y, 3, TILE);
+    ctx.fillStyle = "#6b3e12";
+    for (const [dx, dy] of [[6, 6], [TILE - 8, 6], [6, TILE - 8], [TILE - 8, TILE - 8]]) ctx.fillRect(x + dx, y + dy, 2.5, 2.5);
+    ctx.font = "bold 26px Georgia, serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+    ctx.fillText("?", x + TILE / 2 + 2, y + TILE / 2 + 3);
+    ctx.fillStyle = `rgba(94, 52, 16, ${glow})`;
+    ctx.fillText("?", x + TILE / 2, y + TILE / 2 + 1);
+  } else if (ch === "U") {
+    ctx.fillStyle = "#8a5a32";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.strokeStyle = "#5e3d22";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+    ctx.fillStyle = "#4e3320";
+    for (const [dx, dy] of [[6, 6], [TILE - 8, 6], [6, TILE - 8], [TILE - 8, TILE - 8]]) ctx.fillRect(x + dx, y + dy, 2.5, 2.5);
+  } else if (ch === "=") {
+    ctx.fillStyle = "#9a6a3c";
+    ctx.fillRect(x, y, TILE, 12);
+    ctx.fillStyle = "#c08850";
+    ctx.fillRect(x, y, TILE, 2);
+    ctx.fillStyle = "#5e3d22";
+    ctx.fillRect(x + TILE - 2, y, 2, 12);
+    ctx.fillRect(x, y + 10, TILE, 2);
+    ctx.fillRect(x + 8, y + 12, 4, 6);
+    ctx.fillRect(x + TILE - 12, y + 12, 4, 6);
+  } else if (ch === "^") {
+    const cx = x + TILE / 2;
+    ctx.fillStyle = "#3f7a30";
+    ctx.beginPath();
+    ctx.roundRect(cx - 6, y + 4, 12, TILE - 4, 6);
+    ctx.roundRect(cx - 16, y + 12, 7, 14, 3.5);
+    ctx.roundRect(cx - 16, y + 21, 12, 6, 3);
+    ctx.roundRect(cx + 9, y + 8, 7, 14, 3.5);
+    ctx.roundRect(cx + 4, y + 17, 12, 6, 3);
+    ctx.fill();
+    ctx.fillStyle = "#6fb05a";
+    ctx.fillRect(cx - 1, y + 7, 2, TILE - 9);
+    ctx.fillStyle = "#f0e6c8";
+    for (let i = 0; i < 6; i++) {
+      ctx.fillRect(cx + (i % 2 ? 6 : -8), y + 8 + i * 5, 2, 1);
+    }
+  }
+}
+
+function drawCheckpoint(cp) {
+  const x = cp.x * TILE + TILE / 2, base = (cp.y + 1) * TILE;
+  ctx.fillStyle = "#5e3d22";
+  ctx.fillRect(x - 3, base - 70, 6, 70);
+  ctx.fillRect(x - 3, base - 70, 18, 4);
+  const lx = x + 13, ly = base - 56;
+  ctx.fillStyle = "#3b2a1e";
+  ctx.fillRect(lx - 7, ly - 10, 14, 3);
+  if (cp.lit) {
+    ctx.shadowColor = "#ffcc55";
+    ctx.shadowBlur = 25;
+    ctx.fillStyle = "#ffd36b";
+  } else {
+    ctx.fillStyle = "#6d5a45";
+  }
+  ctx.fillRect(lx - 6, ly - 7, 12, 14);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#3b2a1e";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(lx - 6, ly - 7, 12, 14);
+}
+
+function drawFlag() {
+  const x = level.flag.x * TILE + 18, base = GROUND_ROW * TILE, top = 2 * TILE;
+  ctx.fillStyle = "#d8d8d8";
+  ctx.fillRect(x, top, 5, base - top);
+  circle(x + 2.5, top - 4, 7, "#ffca28");
+  const flagY = won ? Math.min(base - 70, top + 10 + winTimer * 260) : top + 10;
+  ctx.fillStyle = "#c62828";
+  ctx.beginPath();
+  ctx.moveTo(x, flagY);
+  for (let i = 0; i <= 10; i++) {
+    const fx = x - i * 6;
+    ctx.lineTo(fx, flagY + Math.sin(elapsed * 6 + i * 0.6) * 3);
+  }
+  for (let i = 10; i >= 0; i--) {
+    const fx = x - i * 6;
+    ctx.lineTo(fx, flagY + 40 + Math.sin(elapsed * 6 + i * 0.6) * 3);
+  }
+  ctx.closePath();
+  ctx.fill();
+  drawStar(x - 30, flagY + 20, 10, "#ffca28");
+  ctx.fillStyle = "#5e3d22";
+  ctx.fillRect(x - 8, base - 10, 21, 10);
+}
+
+function drawStar(x, y, r, color) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const len = i % 2 === 0 ? r : r * 0.45;
+    ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawCoin(x, y, phase) {
+  const w = Math.abs(Math.cos(elapsed * 4 + phase)) * 9 + 2;
+  ctx.fillStyle = "#b8860b";
+  ctx.beginPath();
+  ctx.ellipse(x, y, w + 1.5, 13.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffcc33";
+  ctx.beginPath();
+  ctx.ellipse(x, y, w, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (w > 6) {
+    ctx.fillStyle = "#fff0a8";
+    ctx.fillRect(x - w * 0.35, y - 7, 2, 14);
+  }
+}
+
+function drawCowboy(p) {
+  if (p.invulnerable > 0 && !won && Math.floor(p.invulnerable * 10) % 2 === 0) return;
+  const airborne = !p.onGround;
+  const swing = airborne ? 3.5 : Math.abs(p.vx) > 20 ? Math.sin(p.walk) * 4 : 0;
+  const skin = "#e0a878";
+  const shirt = "#b71c1c";
+  const vest = "#6d4c41";
+  const leather = "#8d5524";
+
+  ctx.save();
+  ctx.translate(p.x + p.w / 2, p.y + p.h - 17);
+  ctx.scale(p.facing, 1);
+
+  ctx.fillStyle = "#3f5f8a";
+  ctx.fillRect(-6 + swing * 0.5, 4, 5, 9);
+  ctx.fillRect(1 - swing * 0.5, 4, 5, 9);
+  ctx.fillStyle = "#4e2c14";
+  for (const x of [-6 + swing * 0.5, 1 - swing * 0.5]) {
+    ctx.fillRect(x, 11, 5, 5);
+    ctx.fillRect(x, 15, 7, 2);
+    ctx.fillRect(x, 16, 2, 1.5);
+  }
+
+  ctx.fillStyle = shirt;
+  ctx.beginPath();
+  ctx.roundRect(-7, -7, 14, 12, 4);
+  ctx.fill();
+  ctx.fillStyle = vest;
+  ctx.beginPath();
+  ctx.roundRect(-7, -7, 5, 11, [4, 0, 0, 2]);
+  ctx.roundRect(2, -7, 5, 11, [0, 4, 2, 0]);
+  ctx.fill();
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(-7, 3, 14, 2.5);
+  ctx.fillStyle = "#ffca28";
+  ctx.fillRect(-1.5, 2.6, 3.5, 3.2);
+  ctx.fillStyle = leather;
+  ctx.fillRect(-9, 3, 3, 7);
+
+  circle(0, -12.5, 6, skin);
+  ctx.fillStyle = "#5d3a1a";
+  ctx.fillRect(-6, -14, 3, 5);
+  ctx.fillStyle = "#222";
+  ctx.fillRect(2.5, -13, 2, 1.8);
+  ctx.fillStyle = "rgba(60, 40, 20, 0.35)";
+  ctx.fillRect(0, -9.5, 5, 2.5);
+
+  ctx.fillStyle = "#d32f2f";
+  ctx.beginPath();
+  ctx.moveTo(-5, -7.5);
+  ctx.lineTo(5, -7.5);
+  ctx.lineTo(1.5, -2.5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#a0652d";
+  ctx.beginPath();
+  ctx.roundRect(-5.5, -24, 11, 8, [4, 4, 1, 1]);
+  ctx.fill();
+  ctx.fillStyle = "#7a4a1e";
+  ctx.fillRect(-1, -24, 2, 2.5);
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(-5.5, -18.5, 11, 1.8);
+  ctx.fillStyle = leather;
+  ctx.beginPath();
+  ctx.ellipse(0, -16.5, 12, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+  ctx.beginPath();
+  ctx.ellipse(0, -15.8, 10, 1.4, 0, 0, Math.PI);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(1, -3);
+  ctx.rotate(p.shootTimer > 0 ? 0 : 1.25);
+  ctx.fillStyle = shirt;
+  ctx.fillRect(0, -2, 5, 4);
+  ctx.fillStyle = skin;
+  ctx.fillRect(5, -1.5, 5, 3);
+  ctx.fillStyle = "#6d4c41";
+  ctx.fillRect(8, 0, 3, 5);
+  ctx.fillStyle = "#424242";
+  ctx.fillRect(9, -2.5, 5, 4);
+  ctx.fillStyle = "#b0bec5";
+  ctx.fillRect(13, -1.8, 8, 2);
+  if (p.shootTimer > 0.12) circle(23, -0.8, 3.5, "#fff59d");
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawZombie(z) {
+  const s = z.big ? 1.45 : 1.2;
+  const swing = Math.sin(z.walk) * 3;
+  const bob = z.dead ? 0 : Math.abs(Math.sin(z.walk)) * 1.5;
+  const sway = Math.sin(z.walk * 0.5) * 1.2;
+
+  ctx.save();
+  ctx.translate(z.x + z.w / 2, z.y + z.h);
+  if (z.dead) ctx.scale(1.2, 0.3);
+  ctx.translate(0, -13 * s);
+  ctx.scale(z.dir * s, s);
+  ctx.translate(0, -bob);
+
+  ctx.fillStyle = z.pants;
+  ctx.fillRect(-5 + swing * 0.5, 3, 4, 10);
+  ctx.fillRect(1 - swing * 0.5, 3, 4, 10);
+  ctx.fillStyle = z.skin;
+  ctx.fillRect(0, -5 + sway, 12, 3);
+  ctx.fillStyle = z.shirt;
+  ctx.beginPath();
+  ctx.moveTo(-6, -6);
+  ctx.lineTo(6, -6);
+  ctx.lineTo(6, 4);
+  ctx.lineTo(4, 6);
+  ctx.lineTo(2, 4);
+  ctx.lineTo(0, 6);
+  ctx.lineTo(-2, 4);
+  ctx.lineTo(-4, 6);
+  ctx.lineTo(-6, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = z.skin;
+  ctx.fillRect(1, -2 - sway, 12, 3);
+
+  ctx.save();
+  ctx.translate(1, -11);
+  ctx.rotate(0.25);
+  circle(0, 0, 6, z.skin);
+  if (z.hat) {
+    ctx.fillStyle = z.hat;
+    ctx.beginPath();
+    ctx.roundRect(-4, -11, 8, 6, [3, 3, 0, 0]);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 9, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = "#1b1b1b";
+    ctx.fillRect(-5, -6, 3, 2);
+    ctx.fillRect(-1, -7, 2, 2);
+    ctx.fillRect(2, -6, 2, 2);
+  }
+  ctx.shadowColor = "#ff1744";
+  ctx.shadowBlur = 6;
+  circle(2.5, -1, 1.4, z.dead ? "#3e2723" : "#ff1744");
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#3e2723";
+  ctx.fillRect(1, 2, 4, 1.5);
+  ctx.restore();
+  ctx.restore();
+
+  if (z.flash > 0) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.fillRect(z.x - 2, z.y - 6, z.w + 4, z.h + 6);
+  }
+}
+
+function heart(x, y, s, fill) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.3);
+  ctx.bezierCurveTo(x, y, x - s * 0.5, y, x - s * 0.5, y + s * 0.3);
+  ctx.bezierCurveTo(x - s * 0.5, y + s * 0.6, x, y + s * 0.8, x, y + s);
+  ctx.bezierCurveTo(x, y + s * 0.8, x + s * 0.5, y + s * 0.6, x + s * 0.5, y + s * 0.3);
+  ctx.bezierCurveTo(x + s * 0.5, y, x, y, x, y + s * 0.3);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = "#3e1a0a";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawHud() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "rgba(62, 39, 20, 0.85)";
+  ctx.strokeStyle = "#8a5d36";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(12, 12, 470, 44, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  for (let i = 0; i < Math.max(START_HEARTS, hearts); i++) {
+    heart(36 + i * 30, 22, 22, i < hearts ? "#e53935" : "rgba(0, 0, 0, 0.35)");
+  }
+
+  const coinX = 36 + Math.max(START_HEARTS, hearts) * 30 + 16;
+  ctx.fillStyle = "#ffcc33";
+  ctx.beginPath();
+  ctx.ellipse(coinX, 34, 8, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.font = "bold 20px Georgia, serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#f3e5ab";
+  ctx.fillText(`x ${coinCount}`, coinX + 14, 35);
+  ctx.fillText(`Score ${score}`, coinX + 80, 35);
+  ctx.fillText(`${Math.floor(elapsed)}s`, coinX + 230, 35);
+
+  ctx.textAlign = "right";
+  ctx.font = "bold 14px Georgia, serif";
+  ctx.fillStyle = "rgba(243, 229, 171, 0.85)";
+  ctx.fillText(`Sound ${muted ? "off" : "on"} (M)   Music ${musicOn ? "on" : "off"} (N)`, W - 16, H - 16);
+}
+
+function draw() {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  drawBackground();
+
+  const cam = Math.round(camX * scale) / scale;
+  ctx.setTransform(scale, 0, 0, scale, 0, Math.round(worldTop * scale));
+  ctx.translate(-cam, 0);
+
+  const c0 = Math.max(0, Math.floor(camX / TILE) - 1);
+  const c1 = Math.min(level.width - 1, Math.ceil((camX + viewW) / TILE) + 1);
+
+  for (const b of level.buildings) {
+    if ((b.x + b.w) * TILE > camX - 40 && b.x * TILE < camX + viewW + 40) drawBuilding(b);
+  }
+  for (const [x0, x1] of level.fences) drawFence(x0, x1);
+  for (const cp of level.checkpoints) drawCheckpoint(cp);
+  drawFlag();
+
+  for (let ty = 0; ty < ROWS; ty++) {
+    for (let tx = c0; tx <= c1; tx++) {
+      const ch = level.grid[ty][tx];
+      if (ch !== ".") drawTile(ch, tx, ty);
+    }
+  }
+
+  for (const c of level.coins) if (!c.taken && c.x > camX - 40 && c.x < camX + viewW + 40) drawCoin(c.x, c.y, c.phase);
+  for (const c of flyingCoins) drawCoin(c.x, c.y, 0);
+  for (const s of stars) {
+    ctx.shadowColor = "#ffe082";
+    ctx.shadowBlur = 16;
+    drawStar(s.x + s.w / 2, s.y + s.h / 2, 16, "#ffca28");
+    ctx.shadowBlur = 0;
+    circle(s.x + s.w / 2, s.y + s.h / 2, 4, "#fff3c4");
+  }
+
+  for (const z of zombies) if (z.active || z.x < camX + viewW + 60) drawZombie(z);
+  drawCowboy(player);
+
+  ctx.shadowColor = "#fff59d";
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = "#fff59d";
+  for (const b of bullets) ctx.fillRect(b.x - 6, b.y - 1.5, 12, 3);
+  ctx.shadowBlur = 0;
+
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / 0.6);
+    circle(p.x, p.y, 3, p.color);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.font = "bold 16px Georgia, serif";
+  ctx.textAlign = "center";
+  for (const t of popups) {
+    ctx.globalAlpha = Math.min(1, t.life * 2);
+    ctx.fillStyle = "#3e1a0a";
+    ctx.fillText(t.text, t.x + 1, t.y + 1);
+    ctx.fillStyle = "#fff3c4";
+    ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+
+  drawHud();
+}
+
+// ---------- Flow ----------
+
+function loop(time) {
+  if (!running) return;
+  const dt = Math.min(1 / 30, (time - lastTime) / 1000);
+  lastTime = time;
+  update(dt);
+  draw();
+  if (running) requestAnimationFrame(loop);
+}
+
+function start() {
+  initAudio();
+  reset();
+  overlay.classList.add("hidden");
+  if (document.activeElement) document.activeElement.blur();
+  running = true;
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function win() {
+  if (won) return;
+  won = true;
+  winTimer = 0;
+  player.x = level.flag.x * TILE + 18 - player.w;
+  player.vy = 0;
+  sfx.fanfare();
+}
+
+function finish() {
+  running = false;
+  const heartBonus = hearts * 500;
+  score += heartBonus;
+  draw();
+  showOverlay(`
+    <h1>Welcome to the Saloon!</h1>
+    <p>You made it to the end of the trail in ${elapsed.toFixed(1)}s.</p>
+    <p>Coins: ${coinCount} &nbsp;&middot;&nbsp; Heart bonus: ${heartBonus} &nbsp;&middot;&nbsp; Final score: ${score}</p>
+    <button id="start">Ride again</button>`);
+}
+
+function gameOver() {
+  running = false;
+  draw();
+  showOverlay(`
+    <h1>Game Over</h1>
+    <p>The zombies got the better of you this time. You scored ${score} points and collected ${coinCount} coins.</p>
+    <button id="start">Try again</button>`);
+}
+
+function showOverlay(html) {
+  overlay.innerHTML = html;
+  overlay.classList.remove("hidden");
+  document.getElementById("start").addEventListener("click", start);
+}
+
+document.getElementById("start").addEventListener("click", start);
+reset();
+draw();
+</script>
+</body>
+</html>
