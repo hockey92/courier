@@ -86,6 +86,16 @@ export function createMinimap(mini, big, onPick) {
     const k = Math.min(big.width / (w * c + h * s), big.height / (w * s + h * c)) * 0.96;
     fit = { k, cx: big.width / 2, cy: big.height / 2 };
   }
+  // the next turf: a red map pin with its point on the spot
+  const pin = (g, x, y, s) => {
+    g.save(); g.translate(x, y); g.scale(s, s);
+    g.fillStyle = '#ea4335'; g.strokeStyle = '#fff'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(-3, -6, -8, -9, -8, -15); g.arc(0, -15, 8, Math.PI, 0); g.bezierCurveTo(8, -9, 3, -6, 0, 0);
+    g.fill(); g.stroke();
+    g.fillStyle = '#a50e0e'; g.beginPath(); g.arc(0, -15, 3, 0, Math.PI * 2); g.fill();
+    g.restore();
+  };
+  let target = null;
   function drawBig(hero) {
     if (!fit) layout();
     const { k, cx, cy } = fit;
@@ -93,6 +103,7 @@ export function createMinimap(mini, big, onPick) {
     bg.save(); bg.translate(cx, cy); bg.rotate(GRID_TILT); bg.scale(k, k);
     bg.drawImage(map, -map.width / 2, -map.height / 2);
     bg.restore();
+    if (target) pin(bg, ...toScreen(target.x, target.z), 1.3);
     const [hx, hy] = toScreen(hero.x, hero.z);
     arrow(bg, hx, hy, GRID_TILT + hero.heading, 1.4);
     bg.fillStyle = '#fff'; bg.font = '600 14px system-ui, sans-serif'; bg.textAlign = 'center';
@@ -118,8 +129,18 @@ export function createMinimap(mini, big, onPick) {
   return {
     get open() { return open; },
     toggle,
-    draw(hero) {
-      const w = mini.width, h = mini.height;
+    // goal: the next turf's spot, or null; foes: the gangsters, shown as red dots
+    draw(hero, goal = null, foes = []) {
+      target = goal;
+      const w = mini.width, h = mini.height, c = Math.cos(GRID_TILT), s = Math.sin(GRID_TILT);
+      // a world point on the minimap, kept to its edge when it's further away
+      const onMini = (x, z, edge) => {
+        const dx = (x - hero.x) * PX, dz = (z - hero.z) * PX;
+        let px = dx * c - dz * s, py = dx * s + dz * c;
+        const r = Math.hypot(px, py), max = w / 2 - edge;
+        if (r > max) { px *= max / r; py *= max / r; }
+        return [w / 2 + px, h / 2 + py];
+      };
       mg.clearRect(0, 0, w, h);
       mg.save();
       mg.beginPath(); mg.arc(w / 2, h / 2, w / 2 - 2, 0, Math.PI * 2); mg.clip();
@@ -127,6 +148,13 @@ export function createMinimap(mini, big, onPick) {
       mg.translate(w / 2, h / 2); mg.rotate(GRID_TILT);
       mg.drawImage(map, -mx(hero.x), -mz(hero.z));
       mg.restore();
+      mg.fillStyle = '#d93025';
+      for (const f of foes) {
+        if (!f.alive) continue;
+        const [fx, fy] = onMini(f.x, f.z, 6);
+        mg.beginPath(); mg.arc(fx, fy, 3.5, 0, Math.PI * 2); mg.fill();
+      }
+      if (goal) pin(mg, ...onMini(goal.x, goal.z, 4), 0.9);
       arrow(mg, w / 2, h / 2, GRID_TILT + hero.heading, 1);
       mg.fillStyle = '#202124'; mg.font = '700 11px system-ui, sans-serif'; mg.textAlign = 'center';
       mg.fillText('N', w / 2, 14);

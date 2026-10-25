@@ -187,7 +187,8 @@ const DOME = new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
 const cyl = (color, x, y0, y1, z, r, m) => shape(CYL, color, x, (y0 + y1) / 2, z, 0, [r, y1 - y0, r], m);
 
 // instanced props, gathered as the blocks are built
-const trees = [], lamps = [], parked = [], hydrants = [], lanterns = [];
+const trees = [], lamps = [], hydrants = [], lanterns = [];
+export const parked = [];     // { x, y, z, ry, color, box }; box: its collision, until someone drives it off
 function tree(x, y, z, s = 1, blocks = true) {
   trees.push({ x, y, z, s, ry: (x * 7 + z * 13) % 6.28, color: GREENS[Math.abs(Math.round(x * 3 + z)) % GREENS.length] });
   if (blocks) around(x, z, 0.22 * s, y + 3 * s);
@@ -379,9 +380,8 @@ function streetFurniture(c, rnd) {
       const [x, z] = curbPt(k, a, 1.15);
       const ry = k.along === 'x' ? (k.out < 0 ? 0 : Math.PI) : (k.out < 0 ? -Math.PI / 2 : Math.PI / 2);
       const color = CAR_COLORS[Math.floor(rnd() * CAR_COLORS.length)];
-      parked.push({ x, y: TOP, z, ry, color });
-      if (k.along === 'x') solid(x - 2.2, x + 2.2, z - 0.9, z + 0.9, TOP + 1.5);
-      else solid(x - 0.9, x + 0.9, z - 2.2, z + 2.2, TOP + 1.5);
+      const box = k.along === 'x' ? solid(x - 2.2, x + 2.2, z - 0.9, z + 0.9, TOP + 1.5) : solid(x - 0.9, x + 0.9, z - 2.2, z + 2.2, TOP + 1.5);
+      parked.push({ x, y: TOP, z, ry, color, box });
     }
   }
 }
@@ -982,7 +982,7 @@ export function buildHeights(parent) {
     }
   });
   props.carMat = colorMat();
-  props.parked = instanced(props.carGeo, props.carMat, parked);
+  props.parked = instanced(props.carGeo, props.carMat, parked.map(({ box, ...p }) => p));
   const hydrantGeo = template(t => {
     t.box(-0.13, 0.13, 0, 0.5, -0.13, 0.13, rgb('#c8302c'));
     t.box(-0.21, 0.21, 0.28, 0.38, -0.06, 0.06, rgb('#c8302c'));

@@ -6,7 +6,7 @@ import { BLOCK } from './config.js';
 import { say, state } from './state.js';
 import { scene } from './scene.js';
 import { glowMat } from './materials.js';
-import { boxesNear } from './world.js';
+import { arena } from './arena.js';
 import { man } from './actors.js';
 import { buildAk, renderGun, updateGun, updateGunFx } from './guns.js';
 import { buildBasket, renderApples, updateAppleFx, updateApples } from './apples.js';
@@ -39,7 +39,7 @@ export let pickupBlock = 0;
 // a fresh one a few steps into the block, clear of crates and bins
 export function placePickup(p, x, z) {
   for (let k = 0; k < 10; k++, x += 1) {
-    if (!boxesNear(x, 2).some(b => x > b.x0 - 0.5 && x < b.x1 + 0.5 && z > b.z0 - 0.5 && z < b.z1 + 0.5)) break;
+    if (!arena.boxesNear(x, 2, z).some(b => x > b.x0 - 0.5 && x < b.x1 + 0.5 && z > b.z0 - 0.5 && z < b.z1 + 0.5)) break;
   }
   Object.assign(p, { live: true, x, y: 0, z, ammo: WEAPONS[p.type].ammo, wait: false });
 }
@@ -61,7 +61,12 @@ export function putDown(ahead = 0) {
 export function updateWeapons(firing, aimYaw, aimLock) {
   if (state.block !== pickupBlock) {
     pickupBlock = state.block;
-    for (const p of Object.values(pickups)) placePickup(p, (state.block - 1) * BLOCK + WEAPONS[p.type].x, 0.6);
+    for (const p of Object.values(pickups)) {
+      if (arena.weapons && !arena.weapons.includes(p.type)) { p.live = false; continue; }
+      const at = arena.pickupAt && arena.pickupAt(p.type, state.block);
+      if (at) Object.assign(p, { live: true, ...at, ammo: WEAPONS[p.type].ammo, wait: false });
+      else placePickup(p, (state.block - 1) * BLOCK + WEAPONS[p.type].x, 0.6);
+    }
   }
   for (const p of Object.values(pickups)) {
     const near = Math.hypot(man.x - p.x, man.z - p.z);

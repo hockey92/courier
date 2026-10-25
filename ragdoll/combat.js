@@ -5,7 +5,7 @@ import { BODY_R, JUMP_V, S, Z_MAX, Z_MIN } from './config.js';
 import { say, state } from './state.js';
 import { camera, scene } from './scene.js';
 import { addBox, mat } from './materials.js';
-import { boxesNear } from './world.js';
+import { arena } from './arena.js';
 import { dust } from './effects.js';
 import { Ragdoll } from './ragdoll.js';
 import { GANGSTER_LOOKS } from './looks.js';
@@ -37,9 +37,9 @@ export function behind() {
 
 // aggro > 1 shortens the pauses between swings and throws
 export function spawnGangster(type = 'thug', extraHp = 0, aggro = 1) {
-  const kind = GANG_TYPES[type], p = behind(), hp = kind.hp + extraHp;
+  const kind = GANG_TYPES[type], p = arena.spawnAt ? arena.spawnAt() : behind(), hp = kind.hp + extraHp;
   const g = new Ragdoll(p.x, p.z, {
-    style: 'gangster', look: GANGSTER_LOOKS[type], canFlip: false, type, kind, aggro,
+    y: p.y || 0, style: 'gangster', look: GANGSTER_LOOKS[type], canFlip: false, type, kind, aggro,
     hp, maxHp: hp, mass: kind.mass || 1, bulk: kind.bulk || 1,
     speed: (kind.speed + Math.random()) * S, accel: kind.accel + Math.random() * 0.03,
     windup: kind.windup, kickWindup: kind.kickWindup, punchCooldown: 30,
@@ -115,7 +115,7 @@ export function gangsterBrain(g) {
   if (g.onGround && sp > 0.01) {
     // hop over anything just ahead that's low enough to clear
     const ax = g.x + g.vx / sp * 0.55, az = g.z + g.vz / sp * 0.55;
-    for (const b of boxesNear(g.x, 3)) {
+    for (const b of arena.boxesNear(g.x, 3, g.z)) {
       if (ax > b.x0 - BODY_R && ax < b.x1 + BODY_R && az > b.z0 - BODY_R && az < b.z1 + BODY_R &&
           b.top > g.y + 0.05 && b.top - g.y < 1.45) jump = true;
     }
@@ -148,7 +148,7 @@ export function chargeBrain(g) {
     endCharge(g, 60);
     return IDLE;
   }
-  const wall = g.blocked || g.z <= Z_MIN + 0.01 || g.z >= Z_MAX - 0.01;
+  const wall = g.blocked || g.z <= arena.zMin + 0.01 || g.z >= arena.zMax - 0.01;
   if (wall && c.t > CHARGE_WINDUP + 4) {
     endCharge(g);
     g.stun = 130; g.dizzy = true;

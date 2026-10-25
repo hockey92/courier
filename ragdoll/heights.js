@@ -1,22 +1,33 @@
-// Brooklyn Heights, the stretch circled on the map from the Brooklyn Bridge down to Atlantic Ave: the game's
-// ragdoll hero walking the neighbourhood built in heightsworld.js, with traffic, people out walking, an
-// over-the-shoulder or free camera, places to jump to, and a minimap.
+// Brooklyn Heights, the stretch circled on the map from the Brooklyn Bridge down to Atlantic Ave, with the
+// game played on it: the game's hero, gangsters and weapons in the neighbourhood built in heightsworld.js,
+// a run from turf to turf (heightsrun.js), traffic, people out walking, an over-the-shoulder or free
+// camera, places to jump to, and a minimap.
 import * as THREE from 'three';
 import { camera, hemi, keyLight, renderer, scene, stars, sunsetRim } from './scene.js';
 import { RUN_SPEED } from './config.js';
 import { mat, addBox } from './materials.js';
-import { Ragdoll } from './ragdoll.js';
+import { arena } from './arena.js';
+import { state } from './state.js';
 import { SKINS, SKIN_ORDER } from './looks.js';
 import { updateDust } from './effects.js';
 import { cars as gameTraffic } from './traffic.js';
 import { music } from './music.js';
+import { gangsters, man } from './actors.js';
+import { checkHits, gangsterBrain, renderGangs, resolvePunches, updateGangs } from './combat.js';
+import { renderBottles } from './bottles.js';
+import { putDown, renderWeapons, updateWeapons } from './weapons.js';
 import { BQE, BRIDGE, CELLS, CURB, EW, NS, PIERS, PROMENADE, TOP, WALK, WF, bridgeY, descentAt, descentY } from './heightsmap.js';
 import { HEIGHTS, buildHeights, floorAt, inSolid, movers, onLand, props } from './heightsworld.js';
 import { createMinimap } from './heightsmini.js';
+import { createRun, updateHud } from './heightsrun.js';
+import { createCars } from './heightscars.js';
 
+// the fight happens here now, not on the game's street
+Object.assign(arena, HEIGHTS);
 // the ragdoll brings the game's street with it: its traffic doesn't belong here, its music stays off until M
 for (const c of gameTraffic) scene.remove(c.g);
 music.toggle();
+state.bestBlocks = +localStorage.getItem('ragdollBestTurfs') || 0;
 
 // ---------- A sunny late afternoon in October: the sun low over the harbour, west-southwest ----------
 {
@@ -43,10 +54,9 @@ const world = new THREE.Group();
 scene.add(world);
 buildHeights(world);
 
-// ---------- The hero, in whichever skin was last picked in the game ----------
-const saved = localStorage.getItem('ragdollSkin');
-const hero = new Ragdoll(0, 0, { world: HEIGHTS, skin: SKINS[saved] ? saved : 'newyorker' });
-const queued = { jump: false, punch: false, kick: false };
+// ---------- The game's hero, in whichever skin was last picked ----------
+const hero = man;
+const queued = { jump: false, punch: false, kick: false, grab: false };
 function place(r, x, z, y, heading) {
   const sx = x - r.x, sz = z - r.z, sy = y - r.y;
   Object.assign(r, { x, z, y, vx: 0, vz: 0, vy: 0, onGround: true, jumpsLeft: 2 });
@@ -89,6 +99,7 @@ function goTo(x, z, heading) {
 goTo(PLACES[0].x, PLACES[0].z, PLACES[0].heading);
 
 const whoEl = document.getElementById('who'), whereEl = document.getElementById('where'), helpEl = document.getElementById('help');
+const promptEl = document.getElementById('prompt');
 function showSkin() { whoEl.textContent = `Walking as: ${SKINS[hero.skin].name} (C to change)`; }
 function nextSkin() {
   hero.setSkin(SKIN_ORDER[(SKIN_ORDER.indexOf(hero.skin) + 1) % SKIN_ORDER.length]);
@@ -113,6 +124,22 @@ function whereIs(x, z, y) {
   const c = CELLS.find(k => x >= k.x0 && x <= k.x1 && z >= k.z0 && z <= k.z1);
   return c ? { cadman: 'Cadman Plaza Park', borough: 'Columbus Park, by Borough Hall', courts: 'by the courthouses', squibb: 'Squibb Park' }[c.kind] || 'Brooklyn Heights' : 'Brooklyn Heights';
 }
+// out in the open (a street, a sidewalk, a park, the Promenade or the waterfront), not in someone's back yard
+const OPEN = ['cadman', 'courts', 'borough', 'squibb', 'bridge'];
+function outdoors(x, z) {
+  if (x < 0) return true;
+  if (NS.some(s => Math.abs(x - s.x) <= s.r + WALK && z >= s.z0 - WALK && z <= s.z1 + WALK)) return true;
+  if (EW.some(s => Math.abs(z - s.z) <= s.r + WALK && x >= s.x0 - WALK && x <= s.x1 + WALK)) return true;
+  const c = CELLS.find(k => x >= k.x0 && x <= k.x1 && z >= k.z0 && z <= k.z1);
+  return !!c && OPEN.includes(c.kind);
+}
+
+// ---------- The run: turf to turf, the game's gangsters and weapons ----------
+const game = createRun({ spotNear, place, outdoors, home: PLACES[0] });
+arena.spawnAt = game.spawnAt;
+arena.pickupAt = game.pickupAt;
+arena.weapons = ['apples'];
+game.start(1);
 
 // ---------- Traffic ----------
 // lanes: along x or z at a fixed coordinate, one way; y is the road's height (a function of the distance
@@ -151,20 +178,24 @@ traffic.forEach((c, i) => carMesh.setColorAt(i, new THREE.Color(c.color)));
 world.add(carMesh);
 const carObj = new THREE.Object3D();
 const yOf = (L, s) => typeof L.y === 'function' ? L.y(s) : L.y;
+const cars = createCars({ traffic, yOf, place });
 function driveTraffic() {
   for (const c of traffic) {
+    if (c.taken) continue;   // he's driving it now (heightscars.js)
     const L = c.L;
     let gap = Infinity;
     for (const o of traffic) {
-      if (o === c || o.L !== L) continue;
+      if (o === c || o.L !== L || o.taken) continue;
       const d = (o.s - c.s) * L.dir - 4.6;
       if (d > -1 && d < gap) gap = d;
     }
-    // the hero standing in the lane ahead
+    // anyone (him or a gangster) standing in the lane ahead, or a car he's driven
     if (L.walk) {
-      const along = L.axis === 'x' ? hero.x : hero.z, across = L.axis === 'x' ? hero.z : hero.x;
-      const d = (along - c.s) * L.dir - 2.6;
-      if (Math.abs(across - L.at) < 1.7 && Math.abs(hero.y - yOf(L, c.s)) < 2 && d > -1.5) gap = Math.min(gap, d);
+      for (const p of [hero, ...gangsters, ...cars.mine]) {
+        const along = L.axis === 'x' ? p.x : p.z, across = L.axis === 'x' ? p.z : p.x;
+        const d = (along - c.s) * L.dir - 2.6;
+        if (Math.abs(across - L.at) < 1.7 && Math.abs(p.y - yOf(L, c.s)) < 2 && d > -1.5) gap = Math.min(gap, d);
+      }
     }
     const want = gap < 2.5 ? 0 : gap < 14 ? c.cruise * (gap - 2.5) / 11.5 : c.cruise;
     c.v += (want - c.v) * 0.08;
@@ -179,6 +210,7 @@ function driveTraffic() {
 }
 function renderTraffic() {
   traffic.forEach((c, i) => {
+    if (c.taken) { carMesh.setMatrixAt(i, carObj.matrix.makeScale(0, 0, 0)); return; }
     const L = c.L, y = yOf(L, c.s);
     if (L.axis === 'x') { carObj.position.set(c.s, y, L.at); carObj.rotation.set(0, L.dir > 0 ? 0 : Math.PI, 0); }
     else { carObj.position.set(L.at, y, c.s); carObj.rotation.set(0, L.dir > 0 ? -Math.PI / 2 : Math.PI / 2, 0); }
@@ -256,7 +288,7 @@ function renderWalkers(dt, t) {
 // ---------- Cameras: over the hero's shoulder ('walk'), or free ('look') ----------
 const view = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, fov: 60 };
 const HELP = {
-  walk: '↑ ↓ / W S run · ← → / A D or drag to turn · Shift sprint · wheel zoom · Space jump (again for a flip)<br>F punch · G kick · H round kick · Tab map (click to go there) · 1–7 places · C skin · M music · V free camera',
+  walk: '↑ ↓ / W S run · ← → / A D or drag to turn · Shift sprint · wheel zoom · Space jump (again for a flip)<br>F punch (or throw apples, hold it) · G kick · H round kick · E get in / out of a car (or put the apples down) · Tab map (click to go there) · 1–7 places · C skin · M music · V free camera',
   look: 'Drag to look · wheel to zoom · W A S D / arrows to fly · Shift faster · Q E down / up<br>Tab map · 1–7 places · V back to walking',
 };
 let mode = 'walk', walkDist = 6;
@@ -275,8 +307,9 @@ function setMode(m) {
 
 const keys = {};
 const mini = createMinimap(document.getElementById('mini'), document.getElementById('bigmap'), (x, z) => {
-  if (!onLand(x, z) && !onBridge(x, z)) return false;
+  if ((!onLand(x, z) && !onBridge(x, z)) || !hero.alive) return false;
   if (mode === 'look') setMode('walk');
+  if (cars.driving) cars.use();
   return goTo(x, z);
 });
 addEventListener('keydown', e => {
@@ -289,12 +322,14 @@ addEventListener('keydown', e => {
     if (e.code === 'Space') queued.jump = true;
     if (e.code === 'KeyF') queued.punch = true;
     if (e.code === 'KeyG') queued.kick = true;
-    if (e.code === 'KeyH') queued.kick = 'round';
+    if (e.code === 'KeyH') { if (cars.driving) cars.honk(); else queued.kick = 'round'; }
+    if (e.code === 'KeyE') queued.grab = true;
   }
   const n = e.code.startsWith('Digit') ? +e.code.slice(5) : 0;
-  if (n >= 1 && n <= PLACES.length) {
+  if (n >= 1 && n <= PLACES.length && hero.alive) {
     const p = PLACES[n - 1];
     if (mode === 'look') setMode('walk');
+    if (cars.driving) cars.use();
     goTo(p.x, p.z, p.heading);
   }
   if (e.code === 'KeyC') nextSkin();
@@ -322,25 +357,72 @@ renderer.domElement.addEventListener('wheel', e => {
 
 // one 60 Hz step, like the game's: the ragdoll's tuning is all in frames
 function tick() {
-  let ix = 0, iz = 0;
-  if (mode === 'walk' && !mini.open) {
-    walkYaw += ((keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0)) * 0.06;
-    const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-    ix = Math.cos(walkYaw) * fwd; iz = Math.sin(walkYaw) * fwd;
+  const steering = mode === 'walk' && !mini.open;
+  const fwd = steering ? (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) : 0;
+  const turn = steering ? (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0) : 0;
+  const shift = keys.ShiftLeft || keys.ShiftRight;
+  // E: into the nearest car (setting the apples down first), out of this one, or the apples down
+  if (queued.grab) {
+    if (!cars.driving && hero.weapon && cars.nearest()) putDown();
+    if (!cars.use() && hero.weapon) putDown(0.6);
   }
-  // he runs at the game's pace; the neighbourhood is a kilometre across, so Shift sprints
-  hero.speed = RUN_SPEED * (keys.ShiftLeft || keys.ShiftRight ? 2.2 : 1);
-  hero.control(ix, iz, queued.jump, queued.punch, queued.kick);
-  queued.jump = queued.punch = queued.kick = false;
-  hero.step();
+  queued.grab = false;
+  if (cars.driving) {
+    cars.drive(fwd, turn, shift);
+    // the camera swings round behind the car
+    const d = cars.driving.heading - walkYaw;
+    walkYaw += Math.atan2(Math.sin(d), Math.cos(d)) * 0.06;
+    queued.jump = queued.punch = queued.kick = false;
+    updateWeapons(false, walkYaw, false);
+  } else {
+    walkYaw += turn * 0.06;
+    onFoot(Math.cos(walkYaw) * fwd, Math.sin(walkYaw) * fwd, shift);
+  }
+  for (const g of gangsters) g.control(...gangsterBrain(g));
+  resolvePunches();
+  checkHits();
+  if (!cars.driving) hero.step();
+  for (const g of gangsters) g.step();
+  if (hero.alive) state.survived += 1 / 60;
+  updateGangs();
+  game.update();
   updateDust();
   driveTraffic();
+  if (state.shake > 0) state.shake *= 0.85;
+  if (state.caughtTimer > 0) state.caughtTimer--;
+  if (state.banner && --state.banner.t <= 0) state.banner = null;
+}
+// his part of the step on foot, as in the game's update(): running, fists and feet, the apples
+function onFoot(ix, iz, shift) {
+  // he runs at the game's pace; the neighbourhood is a kilometre across, so Shift sprints
+  hero.speed = RUN_SPEED * (shift ? 2.2 : 1);
+  const wasDown = !hero.alive;
+  // apples are thrown while F is held, where the camera looks
+  const firing = !!hero.weapon && hero.alive && mode === 'walk' && (queued.punch || keys.KeyF);
+  if ((queued.kick || (queued.punch && !hero.weapon)) && hero.alive) {
+    // turn to face the nearest gangster in reach
+    let target = null, bestD = 1.6;
+    for (const g of gangsters) {
+      const d = Math.hypot(g.x - hero.x, g.z - hero.z);
+      if (g.alive && d < bestD && Math.abs(g.y - hero.y) < 0.9) { target = g; bestD = d; }
+    }
+    if (target) hero.heading = Math.atan2(target.z - hero.z, target.x - hero.x);
+  }
+  // with apples, holding F keeps throwing (each throw is a punch)
+  const throwing = firing && hero.weapon?.type === 'apples';
+  hero.control(ix, iz, queued.jump, queued.punch || throwing, queued.kick);
+  queued.jump = queued.punch = queued.kick = false;
+  updateWeapons(firing, walkYaw, true);
+  if (wasDown && hero.alive) hero.invuln = 90;
 }
 
 function followHero() {
-  const hip = hero.pts.hip, cx = Math.cos(walkYaw), cz = Math.sin(walkYaw);
+  // behind him, or further back behind the car he's driving (looking from over its roof, so the wall check
+  // doesn't catch the car itself)
+  const car = cars.driving, dist = car ? walkDist + 4 : walkDist;
+  const hip = car ? { x: car.x, y: car.y + 1.2, z: car.z } : hero.pts.hip, cx = Math.cos(walkYaw), cz = Math.sin(walkYaw);
   eye.set(hip.x, hip.y + 0.5, hip.z);
-  camTarget.set(hip.x - cx * walkDist, hip.y + 0.6 + walkDist * 0.32, hip.z - cz * walkDist);
+  camTarget.set(hip.x - cx * dist, hip.y + 0.6 + dist * 0.32, hip.z - cz * dist);
   // pulled in in front of any wall or roof between him and the camera
   for (let k = 1; k <= 14; k++) {
     probe.lerpVectors(eye, camTarget, k / 14);
@@ -348,6 +430,7 @@ function followHero() {
   }
   if (snapCam) { camPos.copy(camTarget); snapCam = false; } else camPos.lerp(camTarget, 0.15);
   camera.position.copy(camPos);
+  if (state.shake > 0.01) camera.position.add(probe.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(state.shake));
   camera.lookAt(hip.x + cx * 4, hip.y + 0.4, hip.z + cz * 4);
   if (camera.fov !== 62) { camera.fov = 62; camera.updateProjectionMatrix(); }
 }
@@ -375,12 +458,24 @@ function frame() {
   const sx = Math.round(fx), sz = Math.round(fz), sy = mode === 'walk' ? hero.y : TOP;
   keyLight.target.position.set(sx, sy, sz);
   keyLight.position.set(sx + SUN.x * 250, sy + SUN.y * 250, sz + SUN.z * 250);
+  state.camX = hero.x; state.camZ = hero.z;   // the sound effects play near here
   renderTraffic();
   renderWalkers(dt, t);
   hero.updateMeshes();
+  if (cars.driving) hero.group.visible = false;   // he's inside
+  for (const g of gangsters) g.updateMeshes();
+  renderWeapons(t);
+  renderGangs(t);
+  renderBottles();
+  game.render(t);
   const where = whereIs(hero.x, hero.z, hero.y);
   if (where !== lastWhere) { whereEl.textContent = where; lastWhere = where; }
-  mini.draw(hero);
+  const car = cars.driving;
+  const prompt = car ? `${Math.round(Math.abs(car.speed) * 60 * 2.237)} mph · E to get out` : hero.alive && cars.nearest() ? 'E: get in the car' : '';
+  if (promptEl.textContent !== prompt) promptEl.textContent = prompt;
+  const target = game.target;
+  mini.draw(hero, target, gangsters);
+  updateHud(target ? Math.hypot(target.x - hero.x, target.z - hero.z) : null);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -388,4 +483,7 @@ showSkin();
 setMode('walk');
 frame();
 
-window.heights = { hero, keys, queued, tick, goTo, setMode, camera, scene, renderer, traffic, walkers, PLACES, mini };
+window.heights = {
+  hero, keys, queued, tick, goTo, setMode, camera, scene, renderer, traffic, walkers, PLACES, mini, game, gangsters, state, cars,
+  get yaw() { return walkYaw; }, set yaw(v) { walkYaw = v; },   // where he's looking (and aiming)
+};

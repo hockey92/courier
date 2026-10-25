@@ -6,7 +6,7 @@ import { GRAVITY } from './config.js';
 import { say, state } from './state.js';
 import { scene } from './scene.js';
 import { addBox, boxGeo, glowMat, mat, orient } from './materials.js';
-import { boxesNear } from './world.js';
+import { arena } from './arena.js';
 import { dust } from './effects.js';
 import { music } from './music.js';
 import { gangsters, man } from './actors.js';
@@ -134,7 +134,7 @@ function rayBox(ox, oz, dx, dz, b) {
 // a level shot from o along (dx, dz): how far it gets before a box or a standing gangster, and who
 export function trace(o, dx, dz) {
   let end = RANGE, hit = null;
-  for (const b of boxesNear(o.x + dx * RANGE / 2, RANGE / 2 + 1)) {
+  for (const b of arena.boxesNear(o.x + dx * RANGE / 2, RANGE / 2 + 1, o.z + dz * RANGE / 2)) {
     const t = rayBox(o.x, o.z, dx, dz, b);
     if (t < end && o.y < b.top) end = t;
   }
@@ -195,16 +195,19 @@ export function updateGunFx() {
   for (const c of brass) {
     if (c.life <= 0) continue;
     c.vy -= GRAVITY;
-    c.m.position.x += c.vx; c.m.position.y += c.vy; c.m.position.z += c.vz;
+    const p = c.m.position;
+    p.x += c.vx; p.y += c.vy; p.z += c.vz;
     c.m.rotation.x += 0.5; c.m.rotation.z += 0.3;
-    if (c.m.position.y < 0.01) { c.m.position.y = 0.01; c.vy *= -0.4; c.vx *= 0.5; c.vz *= 0.5; }
+    const floor = arena.floorAt(p.x, p.z, p.y) + 0.01;
+    if (p.y < floor) { p.y = floor; c.vy *= -0.4; c.vx *= 0.5; c.vz *= 0.5; }
     if (--c.life <= 0) c.m.visible = false;
   }
   if (tossed.t > 0) {
     tossed.t--;
     tossed.vy -= GRAVITY;
     tossed.x += tossed.vx; tossed.y += tossed.vy; tossed.z += tossed.vz;
-    if (tossed.y < 0.04) { tossed.y = 0.04; tossed.vy = 0; tossed.vx *= 0.6; tossed.vz *= 0.6; }
+    const floor = arena.floorAt(tossed.x, tossed.z, tossed.y) + 0.04;
+    if (tossed.y < floor) { tossed.y = floor; tossed.vy = 0; tossed.vx *= 0.6; tossed.vz *= 0.6; }
     else tossed.spin += 0.25;
   }
 }

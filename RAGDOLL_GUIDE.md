@@ -84,6 +84,8 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | `brownstones.js` | brownstone facades, stoops, railings, cornices, iron fences | `FACADE_Z`, `addBrownstone`, `fence` |
 | `homeless.js` | the guy chilling on his cardboard | `buildHomeless` |
 | `world.js` | chunk data (obstacles, collision boxes, house rows, manholes, crossings), chunk building, traffic signals, skyline, chunk loading | `getChunkData`, `boxesNear`, `floorAt`, `openManholeAt`, `signalMats`, `liveChunks`, `syncChunks` |
+| `arena.js` | where the fight happens: the collision and edges ragdolls, gangsters, bullets, apples and bottles use, where gangsters and pickups turn up, and which weapons lie around (`weapons`, null for all). The game's street unless another map swaps itself in (§17) | `arena` |
+| `waves.js` | who's in each round's crew, the kind each round introduces and its tip (shared by the street's blocks and the Heights' turfs) | `wavePlan`, `DEBUT`, `TIPS` |
 | `music.js` | "Broadway Boogie" and sound effects, all synthesised | `music` |
 | `effects.js` | dust puffs | `dust`, `updateDust` |
 | `ragdoll.js` | skeleton and the `Ragdoll` class: controller, attacks, pose, physics, meshes | `Ragdoll`, `NAMES` |
@@ -102,7 +104,7 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | `weapons.js` | the weapons list, a pickup of each on every block, taking / swapping / putting down, and handing each frame to the weapon in his hands | `WEAPONS`, `pickups`, `giveWeapon`, `putDown`, `updateWeapons`, `renderWeapons` |
 | `combat.js` | kinds of gangster, spawning, their brains, Big Tony's charge, landing hits, stomps, clearing away the knocked out, getting busted | `GANG_TYPES`, `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `hurtMan`, `updateGangs`, `renderGangs`, `behind` |
 | `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
-| `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wavePlan`, `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
+| `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
 | `input.js` | held keys, one-shot actions, hotkeys | `keys`, `queued` |
 | `main.js` | `update()` (the fixed-step tick), `render()`, the loop, `window.game` | — |
 
@@ -347,11 +349,13 @@ Three layers, kept separate on purpose:
 `updateMeshes()` (called from `render`) stretches a box between joint pairs with `orient()`.
 
 Where a ragdoll lives comes from its `world` option: `{ boxesNear, floorAt, zMin, zMax, step }`
-(`step` is the tallest ledge it walks straight up onto). It defaults to `GAME_WORLD`, the game's street;
-`montague.js` passes its own so the hero can walk Montague St (§16), and `heightsworld.js` its own for
-Brooklyn Heights (§17). `boxesNear` is called as `boxesNear(x, range, z)`; the game's and Montague's ignore
-the `z`, Brooklyn Heights uses it to look boxes up in a grid. A box may also have a `bottom`: it's then a deck
-that bodies and limbs pass under when they're below it (footbridges, the Brooklyn Bridge's walkway).
+(`step` is the tallest ledge it walks straight up onto). It defaults to `arena` (`arena.js`): the game's
+street, unless a map has swapped its own in, as Brooklyn Heights does (§17). Combat, the gun, apples, bottles
+and weapon pickups use `arena` too, so the whole game runs on whichever map it is. `montague.js` passes its
+own world so the hero can walk Montague St (§16). `boxesNear` is called as `boxesNear(x, range, z)`; the
+game's and Montague's ignore the `z`, Brooklyn Heights uses it to look boxes up in a grid. A box may also
+have a `bottom`: it's then a deck that bodies and limbs pass under when they're below it (footbridges, the
+Brooklyn Bridge's walkway). A ragdoll created with a `y` option starts at that height.
 
 ### Attacks
 - `Ragdoll.swing(t, windup, hold, back)` turns an attack timer into `[wind, ext]` amounts (0…1):
@@ -708,7 +712,8 @@ The game's hero walks it in his saved skin.
 
 Another separate page: the stretch of Brooklyn circled on a map, from the Brooklyn Bridge and Old Fulton St
 down to Atlantic Ave, and from Brooklyn Bridge Park's piers across to Cadman Plaza and Borough Hall, at
-roughly real scale (about 1.2 × 1.4 km). Sunny late afternoon in October. The game's hero walks it.
+roughly real scale (about 1.2 × 1.4 km). Sunny late afternoon in October. The game itself is played on it:
+the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from turf to turf.
 
 - **Axes:** the map is turned to the Heights' street grid: `x` runs grid-east (towards Cadman Plaza), `z`
   grid-south (towards Atlantic Ave); the grid is tilted `GRID_TILT` = 21° from true north, which only the
@@ -739,15 +744,43 @@ roughly real scale (about 1.2 × 1.4 km). Sunny late afternoon in October. The g
   facade textures (one bay × one floor per tile, `tw` / `th` in metres). Plain-coloured parts share one
   vertex-coloured material. Trees, lamps, lanterns, parked cars and hydrants are `instanced()`.
   Materials with `userData.cast = false` (ground, far scenery) skip the shadow pass.
-- **`heights.js`** is the page: the light (the shadow box follows the hero), the hero, traffic in `LANES`
-  (one-way strips along x or z; street lanes stop for him and have collision boxes, the BQE's two decks
-  and the bridge's roadways don't), people walking the sidewalks, the Promenade, the park and the bridge
-  (hidden beyond 160 m), the cameras (the walk camera is pulled in front of walls and roofs), the street
-  name of where he is, and `PLACES` for the number keys. `window.heights` exposes `hero`, `tick`, `goTo`,
-  `setMode`, `traffic`, `walkers`, `PLACES` and `mini`.
+- **`heights.js`** is the page. At the top it swaps the map into the game with `Object.assign(arena, HEIGHTS)`
+  (and `arena.spawnAt` / `arena.pickupAt` from the run), so `combat.js`, `guns.js`, `apples.js`,
+  `bottles.js` and `weapons.js` all work here unchanged. Its `tick()` follows `main.js`'s `update()`: a
+  weapon fires or throws while **F** is held, aimed where the camera looks (`aimLock`, as in the behind
+  view); punches and kicks turn him to the nearest gangster in reach; then the gangsters' brains, hits,
+  stomps, steps, `updateGangs` and the run. It also has the light (the shadow box follows the hero),
+  traffic in `LANES` (one-way strips along x or z; street lanes stop for anyone in them and have collision
+  boxes, the BQE's two decks and the bridge's roadways don't), people walking the sidewalks, the
+  Promenade, the park and the bridge (hidden beyond 160 m), the cameras (the walk camera is pulled in front
+  of walls and roofs, and shakes with `state.shake`), the street name of where he is, and `PLACES` for the
+  number keys. `window.heights` exposes `hero`, `tick`, `goTo`, `setMode`, `yaw` (where he looks and aims),
+  `traffic`, `walkers`, `PLACES`, `mini`, `game`, `gangsters` and `state`.
+- **`heightsrun.js`** is the run, the Heights' version of `blocks.js`: `TURFS` (the Promenade, Montague
+  St, Columbus Park, Cadman Plaza Park, Pier 1, Pier 2, Pier 5, Atlantic Ave, Cranberry St, the War
+  Memorial, then round again with bigger crews). `state.block` is the turf number, so `wavePlan` and the
+  weapon pickups follow it; every fifth turf is Big Tony's. Apples are the only weapon here
+  (`arena.weapons = ['apples']`): a basket waits by each turf. A gold beacon (and a red pin on the minimap)
+  marks the next turf; within `ARRIVE` = 32 m the crew comes out, spawned 12–22 m from him in the open
+  (`spawnAt`: a street, sidewalk, park, the Promenade or the waterfront, at about his level). Gangsters
+  further off than `STRAY` = 48 m come back round near him. Clearing a turf gives back two hearts; busted
+  goes back to the Promenade and turf 1. The best run is saved as `ragdollBestTurfs`. It also draws the HUD
+  in `heights.html` (hearts, turf, crew or distance, ammo, score, banner, Big Tony's bar, fade).
 - **`heightsmini.js`** draws the street map once, Google-coloured, and shows it turned to true north: the
   round minimap follows the hero; **Tab** (or a click on it) opens the full map, where a click on land
   sends him there (`goTo` finds a clear spot at street level, or on the walkway when it's on the bridge).
+- **`heightscars.js`** lets him use cars: **E** gets into the nearest one within 3.2 m (a parked car, which
+  leaves its space and its collision box behind; a car out of the traffic, whose lane slot is marked
+  `taken`; or one he drove before) and out again by whichever door has room. **W/S** drive and reverse,
+  **A/D** steer (tight at low speed, for pulling out of a space), **Shift** floors it (about 80 mph), **H**
+  honks. The car keeps an axis-aligned box in `movers` round its turned footprint; eight points round its
+  body are checked against everything taller than `CLIMB` (curbs and the hills' steps it drives up), in
+  short substeps so thin railings still stop it, and it bounces back off what it hits. Gangsters in front
+  of the bumper at speed are run over (`hitByCar`: three hit points and knocked flat, with a cool-down so it
+  counts once). He rides along hidden and invulnerable at the car's spot, so the crew still comes for the
+  car; street traffic stops behind his cars. The camera sits further back and swings round behind the car.
 - Controls as on Montague St, except that he always runs at the game's pace and **Shift** sprints (2.2×,
-  through `hero.speed`), since the map is a kilometre across; plus **Tab** map, **1–7** places (Promenade, Brooklyn Bridge, Borough Hall,
-  Pier 1, Cadman Plaza Park, Montague St, Atlantic Ave), **Esc** closes the map.
+  through `hero.speed`), since the map is a kilometre across; **F** punches (held, with apples: keeps throwing), **G**
+  kicks, **H** round kicks (honks in a car), **E** gets in or out of a car, or puts the apples down; **Tab** map, **1–7** places (Promenade, Brooklyn
+  Bridge, Borough Hall, Pier 1, Cadman Plaza Park, Montague St, Atlantic Ave; not while he's down), **Esc**
+  closes the map. Red dots on the minimap are the gangsters.

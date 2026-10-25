@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { state } from './state.js';
 import { scene } from './scene.js';
 import { addBox, mat } from './materials.js';
-import { boxesNear } from './world.js';
+import { arena } from './arena.js';
 import { music } from './music.js';
 import { dust } from './effects.js';
 import { man } from './actors.js';
@@ -53,7 +53,7 @@ export function updateBottles(onHit) {
       smash(b);
       continue;
     }
-    const inBox = boxesNear(b.x, 2).some(o => b.x > o.x0 && b.x < o.x1 && b.z > o.z0 && b.z < o.z1 && b.y < o.top);
+    const inBox = arena.boxesNear(b.x, 2, b.z).some(o => b.x > o.x0 && b.x < o.x1 && b.z > o.z0 && b.z < o.z1 && b.y < o.top);
     if (b.y < 0.05 || inBox || b.age > 240) smash(b);
   }
 }

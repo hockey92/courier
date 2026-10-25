@@ -1,10 +1,10 @@
 // The Ragdoll class used by the hero and the gangsters: controller, attacks, animated pose,
 // Verlet ragdoll physics and meshes.
 import * as THREE from 'three';
-import { BODY_R, FARM, GRAVITY, HEAD, HIP_W, JOINT_GAP, JUMP_V, KICK_WINDUP, NECK, RUN_SPEED, S, SHIN, SH_W, THIGH, TORSO, UARM, Z_MAX, Z_MIN, lerp, rot } from './config.js';
+import { BODY_R, FARM, GRAVITY, HEAD, HIP_W, JOINT_GAP, JUMP_V, KICK_WINDUP, NECK, RUN_SPEED, S, SHIN, SH_W, THIGH, TORSO, UARM, lerp, rot } from './config.js';
 import { scene } from './scene.js';
 import { boxGeo, mat, orient } from './materials.js';
-import { boxesNear, floorAt } from './world.js';
+import { arena } from './arena.js';
 import { dust } from './effects.js';
 import { GANGSTER_LOOK, SKINS } from './looks.js';
 
@@ -30,9 +30,6 @@ const THROW_WIND = 10;
 // extra wind-up frames to cock an apple back behind the head
 const APPLE_WIND = 5;
 const UPPER = new Set(['neck', 'head', ...ARMS]);
-// where a ragdoll lives: what blocks it, what it stands on, the edges of the walkable strip, and how high a
-// ledge it walks straight up onto (nothing on the game's street; Montague St has curbs)
-export const GAME_WORLD = { boxesNear, floorAt, zMin: Z_MIN, zMax: Z_MAX, step: 0.03 };
 
 export class Ragdoll {
   constructor(x, z, opts) {
@@ -60,10 +57,12 @@ export class Ragdoll {
       // kickStyle: 'front' or 'round'. A round kick swings the leg out to the side (sweep), tilts the
       // upper body away (tilt) and spins the whole body a full turn (spin, added to the heading)
       kickStyle: 'front', sweep: 0, tilt: 0, spin: 0, round: null,
-      world: GAME_WORLD,
+      // where it lives (arena.js): the game's street, or whatever map has swapped itself in; Montague St
+      // passes its own
+      world: arena,
     }, opts);
     this.pts = {};
-    for (const n of NAMES) this.pts[n] = { x, y: 1, z, px: x, py: 1, pz: z };
+    for (const n of NAMES) this.pts[n] = { x, y: this.y + 1, z, px: x, py: this.y + 1, pz: z };
     this.side = new THREE.Vector3();
     this.shoulders = new THREE.Vector3();
     this.legSide = new THREE.Vector3();

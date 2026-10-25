@@ -6,7 +6,7 @@ import { GRAVITY } from './config.js';
 import { say, state } from './state.js';
 import { scene } from './scene.js';
 import { addBox, boxGeo, cylGeo, mat } from './materials.js';
-import { boxesNear } from './world.js';
+import { arena } from './arena.js';
 import { music } from './music.js';
 import { gangsters, man } from './actors.js';
 import { hurtGangster } from './combat.js';
@@ -111,7 +111,7 @@ export function updateAppleFx() {
       splat(a);
       continue;
     }
-    const inBox = boxesNear(a.x, 2).some(o => a.x > o.x0 && a.x < o.x1 && a.z > o.z0 && a.z < o.z1 && a.y < o.top);
+    const inBox = arena.boxesNear(a.x, 2, a.z).some(o => a.x > o.x0 && a.x < o.x1 && a.z > o.z0 && a.z < o.z1 && a.y < o.top);
     if (a.y < 0.05 || inBox || a.age > 200) {
       if (Math.abs(a.x - state.camX) < 30) music.plop();
       splat(a);
@@ -120,8 +120,10 @@ export function updateAppleFx() {
   for (const b of bits) {
     if (b.life <= 0) continue;
     b.vy -= GRAVITY;
-    b.m.position.x += b.vx; b.m.position.y += b.vy; b.m.position.z += b.vz;
-    if (b.m.position.y < 0.015) { b.m.position.y = 0.015; b.vy = 0; b.vx *= 0.5; b.vz *= 0.5; }
+    const p = b.m.position;
+    p.x += b.vx; p.y += b.vy; p.z += b.vz;
+    const floor = arena.floorAt(p.x, p.z, p.y) + 0.015;
+    if (p.y < floor) { p.y = floor; b.vy = 0; b.vx *= 0.5; b.vz *= 0.5; }
     if (--b.life <= 0) b.m.visible = false;
   }
 }
