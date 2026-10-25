@@ -7,6 +7,22 @@ import { scene } from './scene.js';
 import { addBox, addBuilding, crateMat, cylGeo, glowMat, mat } from './materials.js';
 import { FACADE_Z, FRONT_ROW_SHIFT, addBrownstone, fence } from './brownstones.js';
 import { buildHomeless } from './homeless.js';
+import { CAR_W, LANES, carBoxesNear } from './traffic.js';
+
+// half the depth (z) of each obstacle, and whether it may stand on the strip between the two lanes
+const HALF_D = { crate: 0.35, pyramid: 0.35, trash: 0.25, hydrant: 0.16, dumpster: 0.55, barrier: 0.225 };
+const IN_ROAD = { crate: true, pyramid: true, trash: true, barrier: true };
+// the z bands the traffic drives through, with a little room either side
+const LANE_BANDS = LANES.map(l => [l.z - CAR_W / 2 - 0.15, l.z + CAR_W / 2 + 0.15]);
+// move an obstacle at z out of the traffic lanes, to the nearest sidewalk edge or the middle strip
+function clearOfLanes(type, z) {
+  const h = HALF_D[type];
+  if (!LANE_BANDS.some(([a, b]) => z + h > a && z - h < b)) return z;
+  const spots = [-2.3 - h, 3.5 + h];
+  const [back, front] = [LANE_BANDS[1][1], LANE_BANDS[0][0]];
+  if (IN_ROAD[type] && front - back >= 2 * h) spots.push((back + front) / 2);
+  return spots.reduce((best, s) => Math.abs(s - z) < Math.abs(best - z) ? s : best);
+}
 
 // ---------- World generation ----------
 // Street chunks: ground, a streetlamp, buildings behind the back sidewalk and obstacles.
@@ -19,7 +35,6 @@ export function obstacleBoxes(o) {
     case 'trash': return [b(x, z, 0.5, 0.5, 0.83)];
     case 'hydrant': return [b(x, z, 0.32, 0.32, 0.62)];
     case 'dumpster': return [b(x, z, 1.8, 1.1, 1.08)];
-    case 'taxi': return [b(x, z, 3.6, 1.7, 0.85), b(x - 0.2, z, 2.0, 1.5, 1.43)];
     case 'barrier': return [b(x, z, 1.6, 0.45, 0.8)];
   }
 }
@@ -47,18 +62,22 @@ export function getChunkData(i) {
   for (let x = start + 1.5 + rnd() * 2; x < start + CHUNK - 1.5; x += 3.5 + rnd() * 4) {
     if (Math.abs(x) < 5) continue; // keep the starting spot clear
     const roll = rnd();
+    // (the cars that used to be parked here now drive: traffic.js)
     const type = roll < 0.2 ? 'crate' : roll < 0.3 ? 'pyramid' : roll < 0.45 ? 'trash' : roll < 0.55 ? 'hydrant'
-      : roll < 0.68 ? 'dumpster' : roll < 0.85 ? 'taxi' : 'barrier';
-    let z = type === 'taxi' ? -1.2 + rnd() * 3.6 : Z_MIN + 0.6 + rnd() * (Z_MAX - Z_MIN - 1.2);
+      : roll < 0.68 ? 'dumpster' : roll < 0.85 ? null : 'barrier';
+    let z = Z_MIN + 0.6 + rnd() * (Z_MAX - Z_MIN - 1.2);
+    if (!type) continue;
     if (Math.abs(x - lampX) < 1.6 && z < -3.4) z += 2.2;
     if (homeless && Math.abs(x - homeless.x) < 2.6 && z < -3.2) z += 2.2;
-    const o = { type, x, z };
+    z = clearOfLanes(type, z);
+    const o = { type, x, z, taken: false };
+    o.boxes = obstacleBoxes(o);
     obstacles.push(o);
-    boxes.push(...obstacleBoxes(o));
+    boxes.push(...o.boxes);
   }
-  // a manhole in the road; now and then the crew has left one open (always one just by the start)
+  // a manhole on the strip between the lanes; now and then the crew has left one open (always one just by the start)
   const mrnd = seeded(i * 6151 + 31);
-  const mx = i === 0 ? 3.5 : start + 2 + mrnd() * (CHUNK - 4), mz = i === 0 ? -0.6 : -1.4 + mrnd() * 4;
+  const mx = i === 0 ? 3.5 : start + 2 + mrnd() * (CHUNK - 4), mz = 0.6;
   const covered = boxes.some(b => mx > b.x0 - 0.9 && mx < b.x1 + 0.9 && mz > b.z0 - 0.9 && mz < b.z1 + 0.9);
   const manhole = { x: mx, z: mz, open: (i === 0 || mrnd() < 0.4) && !covered };
   if (manhole.open) boxes.push({ x0: mx - 0.95, x1: mx - 0.55, z0: mz - 0.5, z1: mz - 0.1, top: 0.5 }); // traffic cone
@@ -101,6 +120,7 @@ export function openManholeAt(x, z) {
 export function boxesNear(x, range) {
   const out = [];
   for (let i = Math.floor((x - range) / CHUNK); i <= Math.floor((x + range) / CHUNK); i++) out.push(...getChunkData(i).boxes);
+  out.push(...carBoxesNear(x, range));
   return out;
 }
 
@@ -128,20 +148,6 @@ export function buildObstacle(g, o) {
       addBox(g, 1.9, 0.08, 1.2, mat('#245437'), x, 1.04, z);
       for (const dx of [-0.7, 0.7]) addBox(g, 0.2, 0.1, 0.9, mat('#111'), x + dx, 0.05, z);
       break;
-    case 'taxi': {
-      const yellow = mat('#f2c230');
-      addBox(g, 3.6, 0.6, 1.7, yellow, x, 0.55, z);
-      addBox(g, 3.0, 0.08, 1.72, mat('#222'), x, 0.62, z);
-      addBox(g, 1.96, 0.5, 1.46, mat('#9fc7e8', { emissive: 0x223344 }), x - 0.2, 1.1, z);
-      addBox(g, 2.04, 0.08, 1.52, yellow, x - 0.2, 1.39, z);
-      addBox(g, 0.5, 0.18, 0.22, mat('#fff', { emissive: 0x555544 }), x - 0.2, 1.52, z);
-      for (const dx of [-1.15, 1.15]) for (const dz of [-0.75, 0.75]) addBox(g, 0.6, 0.55, 0.3, mat('#111'), x + dx, 0.28, z + dz);
-      for (const dz of [-0.55, 0.55]) {
-        addBox(g, 0.04, 0.14, 0.3, mat('#fff6c0', { emissive: 0xfff0a0 }), x + 1.8, 0.65, z + dz, false);
-        addBox(g, 0.04, 0.14, 0.3, mat('#d33', { emissive: 0x880000 }), x - 1.8, 0.65, z + dz, false);
-      }
-      break;
-    }
     case 'barrier':
       addBox(g, 1.6, 0.8, 0.45, mat('#b9b6ae'), x, 0.4, z);
       for (const y of [0.55, 0.68]) addBox(g, 1.62, 0.07, 0.47, mat('#e86a1f'), x, y, z);
@@ -249,12 +255,46 @@ export function buildChunk(i) {
   front.visible = showFrontRow();
   g.add(front);
 
-  for (const o of d.obstacles) buildObstacle(g, o);
+  // crates and trash cans get a group each, so one can be lifted out (takeObstacle)
+  const props = new Map();
+  for (const o of d.obstacles) {
+    if (o.taken) continue;
+    if (!PICKABLE[o.type]) { buildObstacle(g, o); continue; }
+    const pg = new THREE.Group();
+    buildObstacle(pg, o);
+    g.add(pg); props.set(o, pg);
+  }
   buildManhole(g, d.manhole);
   if (d.crossing) buildCrossing(g, disposables, start, d.crossing);
   const chillers = d.homeless ? [buildHomeless(g, disposables, d.homeless)] : [];
   scene.add(g);
-  liveChunks.set(i, { g, disposables, chillers, front });
+  liveChunks.set(i, { g, disposables, chillers, front, props });
+}
+
+// what can be picked up and thrown, and how much it weighs on landing a hit (damage, power)
+export const PICKABLE = { crate: { damage: 2, power: 1.8, h: 0.7 }, trash: { damage: 2, power: 1.5, h: 0.88 } };
+
+// the nearest crate or trash can whose side is within reach of (x, z), with its chunk index
+export function pickableNear(x, z, reach) {
+  let best = null, bestD = reach;
+  for (let i = Math.floor((x - 2) / CHUNK); i <= Math.floor((x + 2) / CHUNK); i++) {
+    for (const o of getChunkData(i).obstacles) {
+      if (o.taken || !PICKABLE[o.type]) continue;
+      const b = o.boxes[0];
+      const d = Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.z0 - z, 0, z - b.z1));
+      if (d < bestD) { best = { o, i }; bestD = d; }
+    }
+  }
+  return best;
+}
+
+// lift an obstacle off the street for good: its collision boxes and meshes go
+export function takeObstacle(o, i) {
+  o.taken = true;
+  const d = getChunkData(i);
+  d.boxes = d.boxes.filter(b => !o.boxes.includes(b));
+  const c = liveChunks.get(i);
+  if (c && c.props.has(o)) { c.g.remove(c.props.get(o)); c.props.delete(o); }
 }
 
 export function buildRow(g, disposables, buildings) {

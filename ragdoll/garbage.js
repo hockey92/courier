@@ -10,13 +10,13 @@ import { gangsters, man } from './actors.js';
 // ---------- Flying garbage, blown around by gusty wind ----------
 export const GARBAGE_TYPES = [
   // size, colour, count, how much the wind pushes it, how much it flutters, how fast it falls
-  { size: [0.3, 0.01, 0.22], color: '#ebe7da', count: 35, catch: 1.0, flutter: 1.0, weight: 0.6 },  // paper
-  { size: [0.4, 0.012, 0.3], color: '#c9c4b8', count: 20, catch: 0.9, flutter: 0.8, weight: 0.7 },   // newspaper
-  { size: [0.24, 0.18, 0.2], color: '#f4f4f4', count: 15, catch: 1.2, flutter: 1.4, weight: 0.35, opacity: 0.8 }, // plastic bag
-  { size: [0.07, 0.12, 0.07], color: '#c0392b', count: 15, catch: 0.35, flutter: 0.1, weight: 1.6, metal: true },  // soda can
-  { size: [0.08, 0.11, 0.08], color: '#ffffff', count: 12, catch: 0.6, flutter: 0.3, weight: 1.0 },  // paper cup
-  { size: [0.32, 0.02, 0.26], color: '#a57a4c', count: 15, catch: 0.7, flutter: 0.5, weight: 0.9 },  // cardboard
-  { size: [0.12, 0.008, 0.08], color: '#e3c03a', count: 25, catch: 1.1, flutter: 1.2, weight: 0.5 }, // candy wrapper
+  { size: [0.3, 0.01, 0.22], color: '#ebe7da', count: 14, catch: 1.0, flutter: 1.0, weight: 0.6 },  // paper
+  { size: [0.4, 0.012, 0.3], color: '#c9c4b8', count: 8, catch: 0.9, flutter: 0.8, weight: 0.7 },   // newspaper
+  { size: [0.24, 0.18, 0.2], color: '#f4f4f4', count: 6, catch: 1.2, flutter: 1.4, weight: 0.35, opacity: 0.8 }, // plastic bag
+  { size: [0.07, 0.12, 0.07], color: '#c0392b', count: 6, catch: 0.35, flutter: 0.1, weight: 1.6, metal: true },  // soda can
+  { size: [0.08, 0.11, 0.08], color: '#ffffff', count: 5, catch: 0.6, flutter: 0.3, weight: 1.0 },  // paper cup
+  { size: [0.32, 0.02, 0.26], color: '#a57a4c', count: 6, catch: 0.7, flutter: 0.5, weight: 0.9 },  // cardboard
+  { size: [0.12, 0.008, 0.08], color: '#e3c03a', count: 10, catch: 1.1, flutter: 1.2, weight: 0.5 }, // candy wrapper
 ];
 export const GARBAGE_RANGE = 32;
 export const garbage = [];

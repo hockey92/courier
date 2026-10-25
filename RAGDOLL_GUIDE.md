@@ -90,6 +90,8 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | `view.js` | the camera rig: side, behind and rat's-eye views, key light following | `camPos`, `updateCamera` |
 | `rats.js` | AI rats and the rat you drive | `rats`, `updateRats` |
 | `garbage.js` | wind and instanced litter | `updateGarbage`, `renderGarbage` |
+| `traffic.js` | cars driving both ways, braking, honking, hitting people, their collision boxes | `cars`, `LANES`, `updateTraffic`, `carBoxesNear` |
+| `carry.js` | picking up crates and trash cans, carrying, throwing, smashing (splinters, spilled litter) | `grab`, `updateCarry`, `renderCarry`, `flying` |
 | `combat.js` | kinds of gangster, spawning, their brains, Big Tony's charge, landing hits, stomps, clearing away the knocked out, getting busted | `GANG_TYPES`, `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `hurtMan`, `updateGangs`, `renderGangs`, `behind` |
 | `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
 | `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wavePlan`, `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
@@ -135,7 +137,7 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | -5.15 | iron fence (`FENCE_Z`) |
 | -6.6 … -2.2 | back sidewalk (lamps at -4.6, homeless guy at -4.7) |
 | -2.2 / 3.4 | curbs |
-| -2.2 … 3.4 | road (centre line at 0.6, taxis -1.2 … 2.4) |
+| -2.2 … 3.4 | road: westbound lane centred at -0.9, eastbound at 2.1 (`LANES`), the strip between them (0.1 … 1.1, centre line and manholes at 0.6) |
 | 3.4 … 6.0 | front sidewalk |
 | 6.0 … 7.6 | front row's sidewalk strip (behind view only) |
 | ≥ 7.6 | front row of houses — the back row mirrored (behind view only) |
@@ -178,7 +180,7 @@ one-line description and explicit imports. Files are listed from the bottom of t
 ### Persistence and debugging
 - `localStorage` keys: `ragdollBestBlocks`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
 - `window.game` exposes `man, gangsters, update, render, keys, boxesNear, jump(), punch(), kick(),
-  music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles, paused`.
+  roundKick(), music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles, paused`.
   Add new systems here so they can be driven from the console.
 
 ## 5. World
@@ -194,7 +196,8 @@ one-line description and explicit imports. Files are listed from the bottom of t
 
 ### Collision
 - Solid things are axis-aligned boxes `{ x0, x1, z0, z1, top }` stored in chunk data.
-  `boxesNear(x, range)` fetches them; `floorAt(x, z, y)` finds what you're standing on.
+  `boxesNear(x, range)` fetches them, plus the moving cars' boxes (`carBoxesNear`);
+  `floorAt(x, z, y)` finds what you're standing on.
 - Bodies are blocked from the side unless their feet are above `top`; limbs and litter are pushed out
   along the shallowest side; rats squeeze around.
 - Low things (under ~1.45 m) can be hopped by gangsters; you can stand on anything.
@@ -204,10 +207,39 @@ one-line description and explicit imports. Files are listed from the bottom of t
 2. `buildObstacle(g, o)`: build it from `addBox` calls at `o.x, o.z`.
 3. `getChunkData`: add it to the `roll` table and choose its z range.
 4. Check it doesn't land on the lamp, the homeless guy or the start (there are nudge rules for those).
+5. Add its half-depth to `HALF_D` (and to `IN_ROAD` if it may stand between the lanes):
+   `clearOfLanes` moves anything in the traffic lanes to the nearest sidewalk edge or the middle strip.
+
+### Picking things up (`carry.js`)
+- `PICKABLE` (world.js) lists what can be lifted (single crates and trash cans), with each one's
+  hit damage and power. Each one gets its own group in its chunk (`liveChunks` entry `props`) and
+  keeps its boxes in `o.boxes`. `takeObstacle(o, i)` marks it `taken` (for good: chunk data is
+  cached) and removes its boxes and meshes.
+- **E** (`grab`) lifts the nearest one whose side is within 0.6 m, if he's on the ground and not
+  attacking. `man.holding` puts both arms overhead with the thing on his hands. He moves at 75%,
+  can't punch, kick or flip, and drops it if he's hit (`stun`) or goes down.
+- E again (or F) turns him to the nearest standing gangster within 10 m in front and starts the
+  throw (`throwT`: 10 frames back over the head, release on frame 12, follow-through). It's lobbed at
+  0.22 m/frame so it comes down on the target's chest, or straight ahead if nobody's there.
+- In flight it tumbles and smashes on the first gangster (`hurtGangster` with its damage and power),
+  box (crates, walls, cars) or the ground. Crates burst into splinters; trash cans lose their lid and
+  fling 10 pieces of litter (`garbage`) out of the pool.
+
+### Traffic
+- `traffic.js`: 3 cars per lane (60% taxis) loop within ±80 m of `camX`, re-entering out of sight at
+  the far end. Each cruises at 0.09–0.16 m/frame and brakes (`DECEL`) for the car ahead or anyone
+  whose hip is in its lane, honking (`music.honk`) at people when near the camera.
+- A car still doing over 0.035 m/frame that reaches someone standing hits them (`hitByCar` in
+  `combat.js`). The man loses a heart and is down for 70 frames. A gangster takes 3 damage: it
+  knocks out thugs, runners and throwers, while bruisers and Big Tony go down for a moment. Each
+  body has a 60-frame `carCd` between hits.
+- Cars are boxes in `boxesNear`, so they block and shove people, carry anyone standing on the
+  hood or roof, and catch bottles and litter. `updateTraffic` runs right after the controllers.
 
 ### Manholes
-- One per chunk in the road, from its own stream `seeded(i * 6151 + 31)`; ~40% are left open (cover slid
-  aside, a traffic cone with a collision box). Chunk 0 always has an open one at x = 3.5, z = -0.6, just
+- One per chunk on the strip between the lanes (z = 0.6), from its own stream `seeded(i * 6151 + 31)`;
+  ~40% are left open (cover slid aside, a traffic cone with a collision box). Chunk 0 always has an
+  open one at x = 3.5, just
   ahead of where Pizza Rat appears. A manhole within 0.9 m of an obstacle box always stays closed.
 - `openManholeAt(x, z)` is what the rat you play checks while it's on the ground; nothing else falls in.
 
@@ -253,11 +285,34 @@ Three layers, kept separate on purpose:
 
 ### Attacks
 - `Ragdoll.swing(t, windup, hold, back)` turns an attack timer into `[wind, ext]` amounts (0…1):
-  wind up → 4 frames out → hold → pull back. Punches use the right arm (`punchT`, hold 4, back 8),
-  kicks the left leg (`kickT`, hold 6, back 10).
+  wind up → 4 frames out → hold → pull back. Punches (`punchT`, hold 4, back 8) alternate
+  hands and kicks (`kickT`, hold 6, back 10) alternate legs: each new blow flips `punchSide` /
+  `kickSide`, and `punchHand` / `kickFoot` name the limb that lands it. Kicks go head-high.
+  While fighting (and 45 frames after) the fists come up to a `guard` by the chin; punches drive out
+  from the guard while the shoulders `twist` into them (arm points turn about the neck in `pose()`,
+  the torso and shoulder ends turn with them in `updateMeshes()`).
+- Every third punch (`punches % 3`) is a spinning backfist (`punchStyle = 'back'`), still on
+  alternating hands. `punchW` adds `BACKFIST_SPIN = 12` frames of wind-up, and `backfistSpin()`
+  turns the body a full circle *towards the striking hand* over the wind-up and strike, speeding up
+  all the way (the same `spin` the round kick uses). While he turns, the twist winds the shoulders
+  0.9 rad the other way, carrying the bent arm across so the fist cocks by the far side of the chin.
+  Over the last 4 frames they unwind to −0.25 as the arm snaps straight, and the back of the fist
+  lands in front of him at head height as the turn completes. The hero's backfist has `minDot` −0.1
+  (it also catches someone level with his shoulder) and power 1.3.
+- Round kicks (spinning, **H**, the man only): `control(..., kick = 'round')` sets `kickStyle`;
+  `kickW` adds 4 frames of wind-up. `roundPose()` scripts it in the kicking leg's own frame: a small
+  counter-turn, then `spin` turns the body a full circle *towards the kicking leg* over
+  `ROUND_SPIN = 20` frames. It speeds up all the way, so the kick lands at full speed. The leg stays
+  tucked for the first third, then unfolds, and its `sweep` about the hip goes from 0.9 rad out to its
+  side to straight ahead. So the foot swings round behind him and across, and lands in front at
+  chest height as the turn completes. The follow-through carries it on out to its side as it drops,
+  and the upper body `tilt`s away throughout. `spin` is added to the heading only for drawing
+  (`faceDir` in `pose()` / `updateMeshes()`); `fwd` and movement ignore it, and the pose is followed
+  at stiffness 0.7 while spinning. The hit lands 1 frame before the turn completes: reach 1.4 m,
+  `minDot` −0.3 (the sweep also catches anyone to the side), power 2.4.
 - The blow lands on the frame `t === windup + 4`: `control()` sets `punchHit` / `kickHit`, and the
   game resolves it in `resolvePunches()` through `landHit(attacker, flag, reach, vReach, limbEnd,
-  targets, onHit)`. The class never needs to know who it's fighting.
+  targets, onHit, minDot)`. The class never needs to know who it's fighting.
 - Attacks step the attacker forward (punch +0.035, kick +0.06) so combos stay in range despite
   knockback. If you change knockback, re-test that three punches / two kicks still connect.
 - Starting a flip, getting staggered or knocked out calls `cancelAttacks()`.
@@ -301,6 +356,7 @@ waking him. A kick during the wind-up staggers him out of it.
 | Health | 6 hearts, +2 for each block cleared | see the table above |
 | Punch | wind-up 3, 1 damage, reach 1.0 m | reach 1.0 m |
 | Kick | wind-up 6 (`KICK_WINDUP`), 2 damage, reach 1.2 m, vertical reach 1.7 m (flying kicks) | reach 1.2 m |
+| Round kick | wind-up 10, spin 20, 2 damage, power 2.4, reach 1.4 m in front and to the sides | — |
 | Stomp | landing 1.25–1.95 m above a gangster's feet knocks him out (Big Tony: 3 damage) | — |
 | Between attacks | — | `gap`–2×`gap` frames divided by `aggro` (1 + 0.05 per block); picks next move ahead |
 
@@ -378,7 +434,8 @@ help bar from `HELP_MOVE[mode]` + `HELP_REST`.
 | ← → / A D | turn (0.045 rad/frame) | run along the street |
 | ↑ ↓ / W S | run forward / back | move across the street |
 | Space | jump, again in the air to flip | same |
-| F / G | punch / kick (auto-turns to the nearest gangster) | same |
+| F / G / H | punch / kick / round kick (auto-turns to the nearest gangster) | same |
+| E | pick up the crate or trash can you're next to; E again (or F) throws it | same |
 | C / V / M | next skin / switch camera / sound on-off | same |
 | R | play as Pizza Rat (see below) / back to the man | same |
 
@@ -436,7 +493,7 @@ load) under that manhole, at `SEWER_Y = -20`, and drops the rat down the shaft.
 
 ## 9. Ambient life
 
-- **Litter** (`GARBAGE_TYPES`): one `InstancedMesh` per type (137 pieces in total), blown by a gusty
+- **Litter** (`GARBAGE_TYPES`): one `InstancedMesh` per type (55 pieces in total), blown by a gusty
   wind, kicked up by anyone running through, wrapped around `camX` within ±32 m. Adjust `count` for
   density.
 - **Rats** (`RAT_COUNT = 9` within ±20 m of `camX`): states `idle` (sniff), `wander` (scurry along the

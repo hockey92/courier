@@ -29,7 +29,7 @@ export const HELP_MOVE = {
   behind: '← → turn · ↑ run · ↓ run back',
   side: '← → run · ↑ ↓ move up and down the street',
 };
-export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
+export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
 export function setCamMode(mode) {
   state.camMode = mode;
   localStorage.setItem('ragdollCam', mode);

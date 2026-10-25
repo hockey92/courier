@@ -70,7 +70,7 @@ export function gangsterBrain(g) {
   if (g.attacking) go = 0;
   let ix = ux * go, iz = uz * go;
   // keep tracking him through the wind-up (or while standing off), but commit once the blow is on its way
-  const windingUp = g.punchT >= 0 ? g.punchT < g.windup : g.kickT >= 0 ? g.kickT < g.kickWindup : true;
+  const windingUp = g.punchT >= 0 ? g.punchT < g.punchW : g.kickT >= 0 ? g.kickT < g.kickW : true;
   if ((dist < 1.6 || go === 0) && dist > 1e-4 && windingUp) {
     let diff = Math.atan2(dz, dx) - g.heading;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -184,6 +184,23 @@ export function hurtMan(damage, power, nx, nz) {
   return true;
 }
 
+// run over: the man loses a heart and is flattened for a moment; a gangster takes 3 and goes flying
+export function hitByCar(b, nx, nz) {
+  state.shake = Math.max(state.shake, 0.2);
+  if (b === man) {
+    if (man.invuln > 0) return;
+    if (--man.hp <= 0) { getBusted(nx, nz); return; }
+    man.knockOut(nx, nz, 70, 1.4);
+    say('Watch the traffic!', '', 90);
+    return;
+  }
+  b.hp -= 3;
+  if (b.hp <= 0) { downGangster(b, nx, nz, 1.6); return; }
+  if (b.charge) endCharge(b);
+  b.dizzy = false;
+  b.knockOut(nx, nz, 70, 1.2); // gets back up with what's left of his hp
+}
+
 export function hurtGangster(g, damage, power, nx, nz, punch = false) {
   g.hp -= damage;
   if (g.hp <= 0) { downGangster(g, nx, nz, power); return; }
@@ -213,7 +230,8 @@ export function downGangster(g, nx, nz, power = 1) {
 }
 
 // at the moment a punch or kick is fully extended, hit anyone standing within reach in front
-export function landHit(attacker, flag, reach, vReach, limbEnd, targets, onHit) {
+// (minDot: how far round to the side counts as in front, 1 = dead ahead only)
+export function landHit(attacker, flag, reach, vReach, limbEnd, targets, onHit, minDot = 0.3) {
   if (!attacker[flag]) return;
   attacker[flag] = false;
   const f = attacker.fwd;
@@ -222,7 +240,7 @@ export function landHit(attacker, flag, reach, vReach, limbEnd, targets, onHit) 
     const dx = t.x - attacker.x, dz = t.z - attacker.z, d = Math.hypot(dx, dz);
     if (d > reach || Math.abs(t.y - attacker.y) > vReach) continue;
     const nx = d > 1e-4 ? dx / d : f.x, nz = d > 1e-4 ? dz / d : f.z;
-    if (nx * f.x + nz * f.z < 0.3) continue;
+    if (nx * f.x + nz * f.z < minDot) continue;
     const end = attacker.pts[limbEnd];
     dust(end.x, end.y - 0.05, end.z, 5);
     onHit(t, nx, nz);
@@ -230,8 +248,15 @@ export function landHit(attacker, flag, reach, vReach, limbEnd, targets, onHit) 
 }
 
 export function resolvePunches() {
-  landHit(man, 'punchHit', 1, 0.9, 'handR', gangsters, (g, nx, nz) => hurtGangster(g, 1, 1, nx, nz, true));
-  landHit(man, 'kickHit', 1.2, 1.7, 'footL', gangsters, (g, nx, nz) => hurtGangster(g, 2, 1.8, nx, nz));
+  // a backfist sweeps out to the side, so it also catches someone level with his shoulder
+  const back = man.punchStyle === 'back';
+  landHit(man, 'punchHit', 1, 0.9, man.punchHand, gangsters,
+    (g, nx, nz) => hurtGangster(g, 1, back ? 1.3 : 1, nx, nz, true), back ? -0.1 : 0.3);
+  // a round kick lands in front as the turn completes, but the leg's sweep catches anyone to that side
+  // too, and it knocks them further
+  const round = man.kickStyle === 'round';
+  landHit(man, 'kickHit', round ? 1.4 : 1.2, 1.7, man.kickFoot, gangsters,
+    (g, nx, nz) => hurtGangster(g, 2, round ? 2.4 : 1.8, nx, nz), round ? -0.3 : 0.3);
   // the gangsters hit back: each blow costs him hearts (heavier gangsters knock him further), and
   // a runner who lands one makes off with a heart until you knock him out
   for (const g of gangsters) {
@@ -240,8 +265,8 @@ export function resolvePunches() {
     const landed = (damage, power) => (m, nx, nz) => {
       if (hurtMan(damage, power * heft, nx, nz) && g.type === 'runner' && !g.stolen) { g.stolen = true; g.flee = 240; }
     };
-    landHit(g, 'punchHit', 1, 0.9, 'handR', [man], landed(g.kind.punch, 0.6));
-    landHit(g, 'kickHit', 1.2, 0.9, 'footL', [man], landed(g.kind.kick, 1));
+    landHit(g, 'punchHit', 1, 0.9, g.punchHand, [man], landed(g.kind.punch, 0.6));
+    landHit(g, 'kickHit', 1.2, 0.9, g.kickFoot, [man], landed(g.kind.kick, 1));
   }
 }
 

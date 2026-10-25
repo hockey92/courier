@@ -20,11 +20,11 @@ for (let i = 0; i < 6; i++) {
   bottles.push({ m, live: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, spin: 0, age: 0 });
 }
 
-// thrown from the gangster's right hand so it lands where the target will be in a moment
+// thrown from the gangster's throwing hand so it lands where the target will be in a moment
 export function throwBottle(g, target) {
   const b = bottles.find(b => !b.live);
   if (!b) return;
-  const h = g.pts.handR;
+  const h = g.pts[g.punchHand];
   const T = Math.max(20, Math.hypot(target.x - h.x, target.z - h.z) / BOTTLE_SPEED);
   const tx = target.x + target.vx * T * 0.5, tz = target.z + target.vz * T * 0.5;
   Object.assign(b, { x: h.x, y: h.y, z: h.z, vx: (tx - h.x) / T, vz: (tz - h.z) / T, live: true, spin: 0, age: 0 });

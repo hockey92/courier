@@ -1,4 +1,4 @@
-// Keyboard: held keys, one-shot actions (jump, punch, kick) and hotkeys.
+// Keyboard: held keys, one-shot actions (jump, punch, kick, round kick, pick up / throw) and hotkeys.
 import { state } from './state.js';
 import { music } from './music.js';
 import { changeSkin, setPlayingRat, toggleCam } from './ui.js';
@@ -7,7 +7,7 @@ import { changeSkin, setPlayingRat, toggleCam } from './ui.js';
 export const keys = {};
 
 // one-shot actions, set on key press and used up by the next update
-export const queued = { jump: false, punch: false, kick: false };
+export const queued = { jump: false, punch: false, kick: false, round: false, grab: false };
 
 addEventListener('keydown', e => {
   music.start();
@@ -18,6 +18,8 @@ addEventListener('keydown', e => {
   if (e.code === 'Space' && !keys[e.code]) queued.jump = true;
   if (e.code === 'KeyF' && !keys[e.code]) queued.punch = true;
   if (e.code === 'KeyG' && !keys[e.code]) queued.kick = true;
+  if (e.code === 'KeyH' && !keys[e.code]) queued.round = true;
+  if (e.code === 'KeyE' && !keys[e.code]) queued.grab = true;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   keys[e.code] = true;
 });

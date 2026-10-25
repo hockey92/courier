@@ -217,6 +217,21 @@ export const music = (() => {
     for (let k = 0; k < 4; k++) blip('square', k % 2 ? 196 : 247, k % 2 ? 190 : 240, ctx.currentTime + k * 0.18, 0.16, 0.035);
   }
 
-  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
+  // a New York cab's two-note horn
+  function honk() {
+    if (!ctx || !on) return;
+    for (const f of [370, 440]) blip('sawtooth', f, f * 0.98, ctx.currentTime, 0.32, 0.025);
+  }
+
+  // a thrown crate splintering (a dull crunch) or a trash can landing (a crash and a metal clang)
+  function smash(metal) {
+    if (!ctx || !on) return;
+    const t = ctx.currentTime;
+    hiss(t, metal ? 0.35 : 0.22, 0.3, metal ? 2500 : 500);
+    if (metal) for (const f of [620, 930, 1370]) blip('triangle', f, f * 0.97, t, 0.4, 0.03);
+    else blip('square', 140, 60, t, 0.15, 0.05);
+  }
+
+  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, honk, smash, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
 })();
 addEventListener('pointerdown', () => music.start());

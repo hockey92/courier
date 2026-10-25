@@ -11,7 +11,9 @@ import { updateCamera } from './view.js';
 import { setCamMode, setPlayingRat, setSkin, updateHud } from './ui.js';
 import { renderGarbage, updateGarbage } from './garbage.js';
 import { rats, updateRats } from './rats.js';
-import { behind, checkHits, gangsterBrain, renderGangs, resolvePunches, spawnGangster, updateGangs } from './combat.js';
+import { behind, checkHits, gangsterBrain, hitByCar, renderGangs, resolvePunches, spawnGangster, updateGangs } from './combat.js';
+import { cars, updateTraffic } from './traffic.js';
+import { flying, grab, renderCarry, updateCarry } from './carry.js';
 import { bottles, renderBottles } from './bottles.js';
 import { renderSewer, sewer, updateSewer } from './sewer.js';
 import { holdAtGate, startBlock, updateBlocks, wave } from './blocks.js';
@@ -24,7 +26,7 @@ function update() {
   if (state.playingRat) {
     // the keys drive the rat; the man just stands there taking a break
     state.ratPlayer.input = { turn: right, go: -down, hop: queued.jump, bite: queued.punch };
-    queued.jump = queued.punch = queued.kick = false;
+    queued.jump = queued.punch = queued.kick = queued.round = queued.grab = false;
     ix = iz = 0;
   } else if (state.camMode === 'behind') {
     // steer: left/right turn him and the camera, up runs where the camera looks, down runs back towards it
@@ -37,7 +39,10 @@ function update() {
     }
   }
   const wasDown = !man.alive;
-  if ((queued.punch || queued.kick) && man.alive) {
+  // E picks up or throws; while he's holding something, punch throws it too
+  if (queued.grab || (queued.punch && man.holding)) { grab(); queued.punch = false; }
+  queued.grab = false;
+  if ((queued.punch || queued.kick || queued.round) && man.alive && !man.holding) {
     // turn to face the nearest gangster in reach
     let target = null, bestD = 1.6;
     for (const g of gangsters) {
@@ -46,8 +51,8 @@ function update() {
     }
     if (target) man.heading = Math.atan2(target.z - man.z, target.x - man.x);
   }
-  man.control(ix, iz, queued.jump, queued.punch, queued.kick);
-  queued.jump = queued.punch = queued.kick = false;
+  man.control(ix, iz, queued.jump, queued.punch, queued.round ? 'round' : queued.kick);
+  queued.jump = queued.punch = queued.kick = queued.round = false;
   holdAtGate();
   if (wasDown && man.alive) man.invuln = 90;
 
@@ -63,6 +68,8 @@ function update() {
     }
   }
 
+  updateTraffic([man, ...gangsters], hitByCar);
+  updateCarry();
   resolvePunches();
   checkHits();
   man.step();
@@ -89,6 +96,7 @@ function render() {
   syncChunks(state.camX);
   man.updateMeshes();
   for (const g of gangsters) g.updateMeshes();
+  renderCarry();
   const t = performance.now() / 1000;
   for (const c of liveChunks.values()) for (const animate of c.chillers) animate(t);
   renderGangs(t);
@@ -118,7 +126,9 @@ window.game = {
   jump() { queued.jump = true; },
   punch() { queued.punch = true; },
   kick() { queued.kick = true; },
+  roundKick() { queued.round = true; },
+  grab() { queued.grab = true; },
   music, rats, setSkin, setPlayingRat, sewer,
-  state, wave, startBlock, spawnGangster, bottles,
+  state, wave, startBlock, spawnGangster, bottles, cars, flying,
   set paused(v) { paused = v; }, get paused() { return paused; },
 };
