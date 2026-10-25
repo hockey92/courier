@@ -65,12 +65,12 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span> &nbsp; Sound: <span id="sound">on</span> (M)</div>
+<div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span> &nbsp; Sound: <span id="sound">on</span> (M) &nbsp; Music: <span id="music">on</span> (N)</div>
 <div id="overlay">
   <h1>Zombie Maze</h1>
   <p>You are lost in an endless frontier town overrun by zombies. You shoot automatically at any zombie you can see.</p>
   <p>They shuffle in from beyond every corner. Move with WASD or the arrow keys.</p>
-  <p>Grab the gold sheriff stars to fire more bullets at once. Press M to turn the sound on or off.</p>
+  <p>Grab the gold sheriff stars to fire more bullets at once. Press M to mute all sound, or N to turn the music on or off.</p>
   <button id="start">Play</button>
 </div>
 
@@ -81,6 +81,7 @@ const scoreEl = document.getElementById("score");
 const livesEl = document.getElementById("lives");
 const shotsEl = document.getElementById("shots");
 const soundEl = document.getElementById("sound");
+const musicEl = document.getElementById("music");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("start");
 
@@ -109,6 +110,7 @@ const keys = {};
 window.addEventListener("keydown", e => {
   const key = e.key.toLowerCase();
   if (key === "m" && !e.repeat) toggleSound();
+  if (key === "n" && !e.repeat) toggleMusic();
   keys[key] = true;
 });
 window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
@@ -118,7 +120,11 @@ window.addEventListener("keyup", e => (keys[e.key.toLowerCase()] = false));
 // short falling-pitch thump. Browsers only allow audio to start after a user
 // gesture, so the context is created when Play is clicked.
 
+const MASTER_VOLUME = 0.35;
+const MUSIC_VOLUME = 0.5;
+
 let audio = null, master = null, noiseBuffer = null, muted = false;
+let musicGain = null, echoIn = null, musicOn = true;
 
 function initAudio() {
   if (!audio) {
@@ -126,18 +132,40 @@ function initAudio() {
     if (!AudioCtx) return;
     audio = new AudioCtx();
     master = audio.createGain();
-    master.gain.value = 0.35;
+    master.gain.value = muted ? 0 : MASTER_VOLUME;
     master.connect(audio.destination);
     noiseBuffer = audio.createBuffer(1, Math.floor(audio.sampleRate * 0.3), audio.sampleRate);
     const data = noiseBuffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+    musicGain = audio.createGain();
+    musicGain.gain.value = musicOn ? MUSIC_VOLUME : 0;
+    musicGain.connect(master);
+    echoIn = audio.createGain();
+    const delay = audio.createDelay(1);
+    delay.delayTime.value = 0.33;
+    const feedback = audio.createGain();
+    feedback.gain.value = 0.32;
+    const wet = audio.createGain();
+    wet.gain.value = 0.3;
+    echoIn.connect(delay);
+    delay.connect(feedback).connect(delay);
+    delay.connect(wet).connect(musicGain);
   }
   if (audio.state === "suspended") audio.resume();
+  startMusic();
 }
 
 function toggleSound() {
   muted = !muted;
   soundEl.textContent = muted ? "off" : "on";
+  if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER_VOLUME, audio.currentTime, 0.02);
+}
+
+function toggleMusic() {
+  musicOn = !musicOn;
+  musicEl.textContent = musicOn ? "on" : "off";
+  if (musicGain) musicGain.gain.setTargetAtTime(musicOn ? MUSIC_VOLUME : 0, audio.currentTime, 0.05);
 }
 
 function playShot(volley) {
@@ -170,6 +198,150 @@ function playShot(volley) {
   thump.connect(thumpGain).connect(master);
   thump.start(t);
   thump.stop(t + 0.13);
+}
+
+// ---------- Music ----------
+// An original western tune in A minor on a 16th-note grid: a whistled melody with
+// vibrato and echo, a "boom-chick" guitar, and galloping hoof clip-clops. Notes
+// are scheduled slightly ahead of time on the audio clock so timing stays tight.
+
+const MUSIC_STEP = 60 / 116 / 4;
+const STEPS_PER_BAR = 16;
+
+const CHORDS = {
+  Am: { bass: ["A2", "E2"], strum: ["A3", "C4", "E4"] },
+  G: { bass: ["G2", "D3"], strum: ["G3", "B3", "D4"] },
+  F: { bass: ["F2", "C3"], strum: ["F3", "A3", "C4"] },
+  E: { bass: ["E2", "B2"], strum: ["E3", "G#3", "B3"] },
+  Dm: { bass: ["D3", "A2"], strum: ["D3", "F3", "A3"] },
+};
+
+// Each bar: [chord, [[startStep, note, lengthInSteps], ...]]
+const SONG = [
+  ["Am", [[0, "E5", 6], [6, "A5", 2], [8, "B5", 2], [10, "C6", 6]]],
+  ["Am", [[0, "B5", 2], [2, "A5", 2], [4, "E5", 12]]],
+  ["G", [[0, "D5", 6], [6, "G5", 2], [8, "A5", 2], [10, "B5", 6]]],
+  ["G", [[0, "A5", 2], [2, "G5", 2], [4, "D5", 12]]],
+  ["F", [[0, "C5", 4], [4, "F5", 4], [8, "A5", 4], [12, "C6", 4]]],
+  ["F", [[0, "B5", 4], [4, "A5", 4], [8, "F5", 8]]],
+  ["E", [[0, "E5", 4], [4, "G#5", 4], [8, "B5", 4], [12, "D6", 4]]],
+  ["E", [[0, "C6", 2], [2, "B5", 2], [4, "G#5", 4], [8, "E5", 8]]],
+  ["Am", [[0, "A5", 3], [3, "C6", 3], [6, "E6", 10]]],
+  ["Dm", [[0, "D6", 4], [4, "C6", 2], [6, "A5", 2], [8, "F5", 8]]],
+  ["Am", [[0, "E5", 4], [4, "A5", 4], [8, "C6", 4], [12, "B5", 4]]],
+  ["E", [[0, "G#5", 8], [8, "E5", 8]]],
+  ["Am", [[0, "A5", 3], [3, "C6", 3], [6, "E6", 6], [12, "D6", 4]]],
+  ["Dm", [[0, "C6", 4], [4, "A5", 4], [8, "F5", 4], [12, "D5", 4]]],
+  ["E", [[0, "E5", 4], [4, "G#5", 4], [8, "B5", 4], [12, "G#5", 4]]],
+  ["Am", [[0, "A5", 12]]],
+];
+const HOOVES = [0.55, 0, 0.4, 0.8];
+
+let musicStep = 0, nextStepTime = 0, musicTimer = null;
+
+function noteFreq(name) {
+  const [, letter, accidental, octave] = name.match(/^([A-G])(#|b)?(\d)$/);
+  const semis = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[letter] + (accidental === "#" ? 1 : accidental === "b" ? -1 : 0);
+  const midi = (Number(octave) + 1) * 12 + semis;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function startMusic() {
+  if (!audio || musicTimer) return;
+  nextStepTime = audio.currentTime + 0.1;
+  musicTimer = setInterval(scheduleMusic, 25);
+}
+
+function scheduleMusic() {
+  if (audio.state !== "running") return;
+  if (nextStepTime < audio.currentTime - 0.05) nextStepTime = audio.currentTime + 0.05;
+  while (nextStepTime < audio.currentTime + 0.2) {
+    playMusicStep(musicStep, nextStepTime);
+    nextStepTime += MUSIC_STEP;
+    musicStep = (musicStep + 1) % (SONG.length * STEPS_PER_BAR);
+  }
+}
+
+function playMusicStep(step, t) {
+  const [chordName, melody] = SONG[Math.floor(step / STEPS_PER_BAR)];
+  const chord = CHORDS[chordName];
+  const s = step % STEPS_PER_BAR;
+
+  for (const [start, note, length] of melody) {
+    if (start === s) whistle(noteFreq(note), t, length * MUSIC_STEP);
+  }
+  if (s === 0) pluck(noteFreq(chord.bass[0]), t, 0.4);
+  if (s === 8) pluck(noteFreq(chord.bass[1]), t, 0.35);
+  if (s === 4 || s === 12) chord.strum.forEach((n, i) => strum(noteFreq(n), t + i * 0.012));
+  const hoof = HOOVES[s % 4];
+  if (hoof) clipClop(t, hoof, s % 8 < 4);
+}
+
+function whistle(freq, t, duration) {
+  const osc = audio.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const vibrato = audio.createOscillator();
+  vibrato.frequency.value = 5.5;
+  const vibratoDepth = audio.createGain();
+  vibratoDepth.gain.setValueAtTime(0, t);
+  vibratoDepth.gain.linearRampToValueAtTime(freq * 0.012, t + Math.min(0.2, duration));
+  vibrato.connect(vibratoDepth).connect(osc.frequency);
+
+  const env = audio.createGain();
+  const end = t + duration;
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.22, t + 0.04);
+  env.gain.setValueAtTime(0.22, Math.max(t + 0.04, end - 0.06));
+  env.gain.exponentialRampToValueAtTime(0.0001, end + 0.04);
+  osc.connect(env);
+  env.connect(musicGain);
+  env.connect(echoIn);
+  osc.start(t);
+  vibrato.start(t);
+  osc.stop(end + 0.05);
+  vibrato.stop(end + 0.05);
+}
+
+function pluck(freq, t, volume) {
+  const osc = audio.createOscillator();
+  osc.type = "triangle";
+  osc.frequency.value = freq;
+  const env = audio.createGain();
+  env.gain.setValueAtTime(volume, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+  osc.connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.46);
+}
+
+function strum(freq, t) {
+  const osc = audio.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.value = freq;
+  const tone = audio.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.frequency.setValueAtTime(2200, t);
+  tone.frequency.exponentialRampToValueAtTime(500, t + 0.15);
+  const env = audio.createGain();
+  env.gain.setValueAtTime(0.06, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  osc.connect(tone).connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.2);
+}
+
+function clipClop(t, volume, high) {
+  const osc = audio.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(high ? 1100 : 850, t);
+  osc.frequency.exponentialRampToValueAtTime(high ? 700 : 520, t + 0.04);
+  const env = audio.createGain();
+  env.gain.setValueAtTime(0.18 * volume, t);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  osc.connect(env).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + 0.06);
 }
 
 // ---------- Endless maze ----------
