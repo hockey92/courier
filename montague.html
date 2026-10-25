@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Montague St, Brooklyn</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+  canvas { display: block; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #card { position: fixed; top: 14px; left: 14px; padding: 12px 16px; border-radius: 8px; background: #000b; color: #fff; user-select: none; }
+  #card .name { font-weight: 600; font-size: 15px; }
+  #card .sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+  #card .help { font-size: 12px; opacity: 0.85; margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="name">299 Montague St</div>
+  <div class="sub">Brooklyn, New York · drawn with the ragdoll game's box helpers</div>
+  <div class="sub" id="who"></div>
+  <div class="help" id="help"></div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module" src="ragdoll/montague.js"></script>
+</body>
+</html>

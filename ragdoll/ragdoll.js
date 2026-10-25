@@ -27,7 +27,12 @@ const ROUND_SPIN = 20;
 const BACKFIST_SPIN = 12;
 // frames to swing a held crate back over the head before the throw
 const THROW_WIND = 10;
+// extra wind-up frames to cock an apple back behind the head
+const APPLE_WIND = 5;
 const UPPER = new Set(['neck', 'head', ...ARMS]);
+// where a ragdoll lives: what blocks it, what it stands on, the edges of the walkable strip, and how high a
+// ledge it walks straight up onto (nothing on the game's street; Montague St has curbs)
+export const GAME_WORLD = { boxesNear, floorAt, zMin: Z_MIN, zMax: Z_MAX, step: 0.03 };
 
 export class Ragdoll {
   constructor(x, z, opts) {
@@ -47,11 +52,15 @@ export class Ragdoll {
       // holding: the crate or trash can held overhead (carry.js); throwT: the throw's timer;
       // throwRelease: set on the frame it leaves his hands
       holding: null, throwT: -1, throwRelease: false,
+      // weapon: what he's armed with (weapons.js), { type: 'ak' | 'apples', ammo, cooldown }; aiming: he
+      // keeps facing his aim instead of turning the way he runs
+      weapon: null, aiming: false,
       // guard: 0..1 how far the fists are up; twist: shoulder turn into a punch (+ = right shoulder forward)
       guard: 0, guardT: 0, twist: 0,
       // kickStyle: 'front' or 'round'. A round kick swings the leg out to the side (sweep), tilts the
       // upper body away (tilt) and spins the whole body a full turn (spin, added to the heading)
       kickStyle: 'front', sweep: 0, tilt: 0, spin: 0, round: null,
+      world: GAME_WORLD,
     }, opts);
     this.pts = {};
     for (const n of NAMES) this.pts[n] = { x, y: 1, z, px: x, py: 1, pz: z };
@@ -75,6 +84,7 @@ export class Ragdoll {
     if (this.stun > 0) { this.stun--; ix = iz = 0; jump = punch = kick = false; }
     // carrying something heavy: slower, and no fighting until it's thrown
     if (this.holding) { ix *= 0.75; iz *= 0.75; punch = kick = false; }
+    if (this.rifle) punch = false; // the punch button fires it instead
     if (this.throwT >= 0) {
       this.throwT++;
       if (this.throwT === THROW_WIND + 2) this.throwRelease = true;
@@ -85,8 +95,8 @@ export class Ragdoll {
     if (punch && !this.flipping && this.kickT < 0 && punchFree) {
       this.punchT = 0;
       this.punchSide = this.punchSide === 'R' ? 'L' : 'R';
-      // every third punch is a backfist
-      this.punchStyle = ++this.punches % 3 === 0 ? 'back' : 'straight';
+      // every third punch is a backfist; holding apples, the punch is an overarm throw
+      this.punchStyle = this.weapon?.type === 'apples' ? 'throw' : ++this.punches % 3 === 0 ? 'back' : 'straight';
     }
     if (kick && !this.flipping && this.kickT < 0 && punchFree) {
       this.cancelAttacks(); this.kickT = 0;
@@ -119,13 +129,14 @@ export class Ragdoll {
     this.vx += (ix * this.speed - this.vx) * a;
     this.vz += (iz * this.speed - this.vz) * a;
     this.x += this.vx; this.z += this.vz;
-    if (this.z < Z_MIN) { this.z = Z_MIN; this.vz = 0; }
-    if (this.z > Z_MAX) { this.z = Z_MAX; this.vz = 0; }
+    const w = this.world;
+    if (this.z < w.zMin) { this.z = w.zMin; this.vz = 0; }
+    if (this.z > w.zMax) { this.z = w.zMax; this.vz = 0; }
 
     // obstacles block from the side unless the feet are above their top
     this.blocked = false;
-    for (const b of boxesNear(this.x, 4)) {
-      if (this.y >= b.top - 0.03) continue;
+    for (const b of w.boxesNear(this.x, 4)) {
+      if (this.y >= b.top - w.step) continue;
       const cx = Math.max(b.x0, Math.min(b.x1, this.x)), cz = Math.max(b.z0, Math.min(b.z1, this.z));
       let dx = this.x - cx, dz = this.z - cz;
       const d = Math.hypot(dx, dz);
@@ -146,13 +157,13 @@ export class Ragdoll {
 
     const sp = Math.hypot(this.vx, this.vz);
     this.run = Math.min(1, sp / RUN_SPEED);
-    if (sp > 0.012) {
+    if (sp > 0.012 && !this.aiming) {
       let diff = Math.atan2(this.vz, this.vx) - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       this.heading += diff * 0.25;
     }
 
-    const floor = floorAt(this.x, this.z, this.y);
+    const floor = w.floorAt(this.x, this.z, this.y);
     if (this.onGround && this.y > floor + 0.01) { this.onGround = false; this.vy = 0; }
 
     const maxJumps = this.canFlip && !this.holding ? 2 : 1;
@@ -195,7 +206,8 @@ export class Ragdoll {
   }
   punchPose() { return Ragdoll.swing(this.punchT, this.punchW, 4, 8, this.flipping); }
   // a spinning backfist winds up for most of its turn
-  get punchW() { return this.windup + (this.punchStyle === 'back' ? BACKFIST_SPIN : 0); }
+  get punchW() { return this.windup + (this.punchStyle === 'back' ? BACKFIST_SPIN : this.punchStyle === 'throw' ? APPLE_WIND : 0); }
+  get rifle() { return this.weapon?.type === 'ak'; }
   // Spinning backfist: the body turns a full circle towards the striking hand's side, speeding up all
   // the way, with the arm folded across the chest (the wind-up). The arm whips out straight over the
   // last 4 frames, so the back of the fist lands in front of him as the turn completes.
@@ -272,8 +284,9 @@ export class Ragdoll {
 
   getUp() {
     const h = this.pts.hip;
-    this.x = h.x; this.z = Math.max(Z_MIN, Math.min(Z_MAX, h.z));
-    this.y = floorAt(this.x, this.z, h.y);
+    const w = this.world;
+    this.x = h.x; this.z = Math.max(w.zMin, Math.min(w.zMax, h.z));
+    this.y = w.floorAt(this.x, this.z, h.y);
     this.vx = this.vz = this.vy = 0;
     this.onGround = true; this.jumpsLeft = 2;
     this.stiffness = 0.02;
@@ -354,6 +367,8 @@ export class Ragdoll {
       t[ft] = { x: t[k].x + v.x, y: t[k].y + v.y };
     }
 
+    // shouldering a rifle (eased out in the flip's tuck)
+    const aim = this.rifle ? 1 - tuck : 0;
     for (const [e, h, off] of [['elbowL', 'handL', Math.PI], ['elbowR', 'handR', 0]]) {
       let a, bend;
       if (airborne) {
@@ -376,11 +391,22 @@ export class Ragdoll {
         a = lerp(a, lerp(lerp(2.6, 3.4, tWind), 1.9, tExt), lift);
         bend = lerp(bend, lerp(lerp(0.4, 0.7, tWind), 0.1, tExt), lift);
       }
+      // rifle: right hand on the grip by the chest, left hand reaching forward under the barrel. The arms
+      // only bend in their own side planes, so the bladed shoulders (twist, in step()) and a turn of
+      // each arm about the neck (below) bring both hands onto the gun's line.
+      if (aim) {
+        a = lerp(a, off ? 1.3 : 0.05, aim);
+        bend = lerp(bend, off ? 0.1 : 2.1, aim);
+      }
       if (e === 'elbow' + this.punchSide && (wind || ext) && this.punchStyle === 'back') {
         // backfist: elbow up and the fist cocked by the chin (the shoulder twist carries it across to the
         // far side) while he spins, then the arm snaps straight as the shoulders unwind
         a = lerp(lerp(a, 1.3, wind), Math.PI / 2 + 0.1, ext);
         bend = lerp(lerp(bend, 1.1, wind), 0.1, ext);
+      } else if (e === 'elbow' + this.punchSide && (wind || ext) && this.punchStyle === 'throw') {
+        // overarm throw: the arm up with the hand cocked back behind the head, then whipped over the top
+        a = lerp(lerp(a, 3.4, wind), 1.9, ext);
+        bend = lerp(lerp(bend, 1.3, wind), 0.1, ext);
       } else if (e === 'elbow' + this.punchSide && (wind || ext)) {
         // draw the fist in by the chin, then drive it straight out at face height
         a = lerp(lerp(a, 0.1, wind), Math.PI / 2, ext);
@@ -406,7 +432,8 @@ export class Ragdoll {
         x = cx + dx * c - lat * s;
         lat = dx * s + lat * c;
       };
-      if (ARMS.has(n)) turn(t.neck.x, this.twist); // the arms turn with the shoulders around the neck
+      // the arms turn with the shoulders around the neck
+      if (ARMS.has(n)) turn(t.neck.x, this.twist + aim * (LAT[n] > 0 ? -0.1 : 0.6));
       if (this.sweep && kicker.includes(n)) turn(hip.x, this.sweep); // the round kick's leg swings out to the side
       if (this.tilt && UPPER.has(n)) {
         // the upper body leans sideways about the hip, away from a round kick
@@ -427,8 +454,11 @@ export class Ragdoll {
     // shoulders turn into a straight punch; a backfist winds them the other way round first
     const back = this.punchStyle === 'back';
     // (a backfist ends just to the hand's side of straight ahead, the fist still travelling across)
-    const turn = back ? 0.9 * wind - 0.25 * ext : 0.35 * ext - 0.1 * wind;
-    this.twist += ((this.punchSide === 'R' ? 1 : -1) * turn - this.twist) * (back ? 0.6 : 0.4);
+    // (a throw draws the shoulder right back, then drives it through)
+    const turn = back ? 0.9 * wind - 0.25 * ext : this.punchStyle === 'throw' ? 0.5 * ext - 0.45 * wind : 0.35 * ext - 0.1 * wind;
+    // with a rifle the left shoulder leads
+    const twistTo = this.rifle ? -0.4 : (this.punchSide === 'R' ? 1 : -1) * turn;
+    this.twist += (twistTo - this.twist) * (back ? 0.6 : 0.4);
     // round kick: spin towards the kicking leg's side, the leg sweeping round with him
     const r = this.round = this.roundPose();
     const side = this.kickSide === 'L' ? 1 : -1;
@@ -448,7 +478,8 @@ export class Ragdoll {
         q.x += (tg.x - q.x) * k; q.y += (tg.y - q.y) * k; q.z += (tg.z - q.z) * k;
       }
     }
-    const solids = boxesNear(pts.hip.x, 5);
+    const { zMin, zMax } = this.world;
+    const solids = this.world.boxesNear(pts.hip.x, 5);
     for (let i = 0; i < 6; i++) {
       for (const [a, b, len, strength] of STICKS) {
         const p1 = pts[a], p2 = pts[b];
@@ -465,7 +496,7 @@ export class Ragdoll {
           q.y = r;
           q.px += (q.x - q.px) * 0.3; q.pz += (q.z - q.pz) * 0.3; // ground friction
         }
-        q.z = Math.max(Z_MIN - 0.4, Math.min(Z_MAX + 0.4, q.z));
+        q.z = Math.max(zMin - 0.4, Math.min(zMax + 0.4, q.z));
         // push limbs out of obstacles along the shallowest side
         for (const o of solids) {
           if (q.x > o.x0 - r && q.x < o.x1 + r && q.z > o.z0 - r && q.z < o.z1 + r && q.y < o.top + r) {
@@ -489,7 +520,7 @@ export class Ragdoll {
 
   buildMeshes() {
     if (this.group) scene.remove(this.group);
-    this.cup = this.shoes = null;
+    this.cup = this.bag = this.shoes = null;
     const g = this.group = new THREE.Group();
     const look = this.look || (this.style === 'gangster' ? GANGSTER_LOOK : SKINS[this.skin] || SKINS.newyorker);
     const top = mat(look.top), arms = mat(look.arms || look.top), legs = mat(look.legs);
@@ -564,6 +595,13 @@ export class Ragdoll {
       const hd = P.handL;
       this.cup.position.set(hd.x + f.x * 0.03, hd.y, hd.z + f.z * 0.03);
       this.cup.rotation.set(0, 0, this.alive ? 0 : Math.PI / 2);
+    }
+    if (this.bag) {
+      // hangs just outside the right hand, clear of the leg; set aside while his hands are full
+      const hd = P.handR;
+      this.bag.visible = !this.weapon && !this.holding;
+      this.bag.position.set(hd.x - sd.x * 0.07, Math.max(hd.y, this.alive ? 0.37 : 0.1), hd.z - sd.z * 0.07);
+      this.bag.rotation.set(0, -this.heading - this.spin, this.alive ? 0 : Math.PI / 2);
     }
     this.group.visible = !(this.invuln > 0 && Math.floor(this.invuln / 5) % 2);
   }

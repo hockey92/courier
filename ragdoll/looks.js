@@ -200,6 +200,59 @@ export const SKINS = {
     },
   },
 
+  drifter: {
+    name: 'Boardwalk Drifter',
+    top: '#3f6b63', legs: '#4a4d53', skin: '#e8b99a',
+    shoes: { color: '#1c1c1f', sole: '#a8652e' },
+    // wavy shoulder-length blond hair swept back, stubble, a teal work shirt open at the collar, black
+    // belt, faded grey jeans, white socks, gum-soled sneakers and an olive canvas duffel bag
+    decorate(k) {
+      const { r, g, head, torso, deco, skin, h, tl } = k;
+      const hair = mat('#b88a4a'), streak = mat('#d4a862'), collar = mat('#38625a');
+      deco(head, 0.3, 0.07, 0.3, hair, -0.01, h + 0.025, 0);                              // hair on top
+      deco(head, 0.08, 0.05, 0.28, hair, h - 0.03, h + 0.04, 0);                          // swept back off the forehead
+      deco(head, 0.2, 0.03, 0.01, streak, 0.01, h + 0.062, 0.01);                          // middle parting
+      deco(head, 0.03, 0.34, 0.3, hair, -h - 0.01, -0.03, 0);                             // down the back to the collar
+      for (const s of [-1, 1]) {
+        deco(head, 0.25, 0.36, 0.045, hair, -0.015, -0.04, s * (h + 0.02));               // wavy locks over the ears
+        deco(head, 0.09, 0.11, 0.04, streak, 0.05, -0.17, s * (h + 0.035));               // curling out at the jaw
+      }
+      deco(head, 0.03, 0.07, 0.05, streak, h + 0.006, h - 0.035, 0.085);                  // a strand fallen forward
+      basicFace(k, { hair: '#9a7038', eyes: '#24343a', nose: '#d9a383' });
+      deco(head, 0.02, 0.06, 0.25, mat('#c9a27a'), h + 0.002, -0.1, 0);                   // stubble
+      deco(head, 0.02, 0.018, 0.09, mat('#a87a45'), h + 0.006, -0.05, 0);                 // moustache
+      deco(head, 0.02, 0.022, 0.06, mat('#7a3e34'), h + 0.007, -0.078, 0);                // mouth, a little open
+      // the shirt: open collar, button placket and two flapped chest pockets
+      deco(torso, 0.022, 0.09, 0.07, skin, 0.122, tl - 0.045, 0);                         // open neck
+      deco(torso, 0.022, 0.05, 0.035, skin, 0.122, tl - 0.11, 0);
+      deco(torso, 0.04, 0.06, 0.2, collar, -0.06, tl + 0.02, 0);                          // collar behind the neck
+      for (const s of [-1, 1]) {
+        deco(torso, 0.12, 0.05, 0.03, collar, 0, tl + 0.015, s * 0.09);                   // collar sides
+        deco(torso, 0.02, 0.06, 0.05, collar, 0.123, tl - 0.03, s * 0.065);               // collar points
+        deco(torso, 0.02, 0.1, 0.085, mat('#3a645c'), 0.123, tl - 0.16, s * 0.085);       // chest pocket
+        deco(torso, 0.024, 0.03, 0.09, collar, 0.125, tl - 0.115, s * 0.085);             // pocket flap
+      }
+      deco(torso, 0.02, 0.42, 0.025, collar, 0.122, -0.07, 0);                            // placket
+      for (const y of [0.08, -0.04, -0.16]) deco(torso, 0.024, 0.018, 0.018, mat('#d8d8cf'), 0.126, y, 0); // buttons
+      deco(torso, 0.25, 0.045, 0.33, mat('#151515'), 0, -tl + 0.02, 0);                   // belt
+      deco(torso, 0.03, 0.035, 0.045, mat('#b8b8b8', { metalness: 0.6, roughness: 0.3 }), 0.127, -tl + 0.02, 0.03); // buckle
+      hands(k, '#e8b99a', '#35605a');
+      // the legs' +x faces backwards (they point down), so the faded fronts of the jeans are at -x
+      const fade = mat('#53565d'), sock = mat('#f2f2ee');
+      for (const thigh of [r.parts.thighL, r.parts.thighR]) deco(thigh, 0.01, 0.26, 0.13, fade, -0.083, 0.02, 0);
+      for (const shin of [r.parts.shinL, r.parts.shinR]) deco(shin, 0.155, 0.06, 0.155, sock, 0, 0.14, 0);
+      // olive canvas duffel, hanging from the right hand (placed in updateMeshes)
+      const bag = r.bag = new THREE.Group(), olive = mat('#5b5a36'), strap = mat('#8f7a4e');
+      for (const x of [-0.07, 0.07]) deco(bag, 0.025, 0.14, 0.02, strap, x, -0.06, 0);   // handles
+      deco(bag, 0.34, 0.22, 0.16, olive, 0, -0.24, 0);                                    // body
+      deco(bag, 0.35, 0.05, 0.165, mat('#4a4a2c'), 0, -0.33, 0);                          // bottom panel
+      deco(bag, 0.3, 0.012, 0.03, mat('#2f2f1e'), 0, -0.128, 0);                          // zip
+      deco(bag, 0.08, 0.06, 0.005, mat('#c9c0a6'), -0.08, -0.2, 0.082);                   // patch
+      for (let i = 0; i < 6; i++) deco(bag, 0.018, 0.018, 0.005, mat('#b5b0a0', { metalness: 0.5 }), -0.1 + i * 0.04, -0.3, 0.084); // studs
+      g.add(bag);
+    },
+  },
+
   classic: {
     name: 'Classic Ragdoll',
     top: '#0b0b0b', legs: '#0b0b0b', skin: '#0b0b0b',

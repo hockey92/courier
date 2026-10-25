@@ -8,6 +8,7 @@ import { gangsters, man } from './actors.js';
 import { camPos } from './view.js';
 import { rats } from './rats.js';
 import { leaveSewer } from './sewer.js';
+import { WEAPONS } from './weapons.js';
 
 // skin picker: the buttons in the corner or the C key
 export const skinName = document.getElementById('skinName');
@@ -26,10 +27,10 @@ skinName.textContent = SKINS[man.skin].name;
 // camera switch: the button in the corner or the V key
 export const camBtn = document.getElementById('camBtn'), helpBar = document.getElementById('help');
 export const HELP_MOVE = {
-  behind: '← → turn · ↑ run · ↓ run back · click the game to steer with the mouse (Esc lets go)',
-  side: '← → run · ↑ ↓ move up and down the street',
+  behind: '← → turn · ↑ run · ↓ run back · click the game to steer with the mouse (Esc lets go) · weapons aim where the camera looks',
+  side: '← → run · ↑ ↓ move up and down the street · weapons aim at the mouse cursor (or where he faces if you leave the mouse alone)',
 };
-export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · mouse: left click punch / throw, right click kick, middle or Shift+click round kick (aimed at the cursor, or where he faces while steering with the mouse) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
+export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · walk over the AK-47 or the apple basket to pick it up (it swaps for what you hold): F or left click fires or throws where you aim (hold for full auto), E puts it down · mouse: left click punch / throw, right click kick, middle or Shift+click round kick (aimed at the cursor, or where he faces while steering with the mouse) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
 export function setCamMode(mode) {
   state.camMode = mode;
   // mouse steering is only for the behind view
@@ -104,6 +105,7 @@ export const hudStreet = document.getElementById('street');
 export const hudCrew = document.getElementById('crew');
 export const hudSub = document.getElementById('sub');
 export const hudHearts = document.getElementById('hearts');
+export const hudAmmo = document.getElementById('ammo');
 export const bannerEl = document.getElementById('banner');
 export const bannerTitle = document.getElementById('bannerTitle'), bannerSub = document.getElementById('bannerSub');
 export const bossEl = document.getElementById('boss'), bossFill = document.getElementById('bossFill');
@@ -127,6 +129,8 @@ export function updateHud() {
   hudCrew.classList.toggle('go', state.gateOpen);
   const hearts = man.alive ? Math.max(0, man.hp) : 0;
   hudHearts.textContent = '♥'.repeat(hearts) + '♡'.repeat(man.maxHp - hearts);
+  const w = man.weapon;
+  hudAmmo.textContent = w ? `${WEAPONS[w.type].name} · ${w.ammo}/${WEAPONS[w.type].ammo}` : '';
   hudSub.textContent = `Best: ${state.bestBlocks} block${state.bestBlocks === 1 ? '' : 's'} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
   const b = state.banner;
   if (b !== shownBanner) {

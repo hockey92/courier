@@ -17,6 +17,7 @@ import { flying, grab, renderCarry, updateCarry } from './carry.js';
 import { bottles, renderBottles } from './bottles.js';
 import { renderSewer, sewer, updateSewer } from './sewer.js';
 import { holdAtGate, startBlock, updateBlocks, wave } from './blocks.js';
+import { giveWeapon, pickups, putDown, renderWeapons, updateWeapons } from './weapons.js';
 
 // ---------- Update ----------
 function update() {
@@ -49,10 +50,21 @@ function update() {
     if (Math.hypot(ax, az) > 0.3) man.heading = Math.atan2(az, ax);
   }
   queued.aim = null;
-  // E picks up or throws; while he's holding something, punch throws it too
-  if (queued.grab || (queued.punch && man.holding)) { grab(); queued.punch = false; }
+  // a weapon fires (or throws) while F or the left button is held, aimed by hand: where the camera looks
+  // in the behind view; in the side view at the cursor while the mouse is in use (he keeps facing it),
+  // otherwise the way he's facing
+  mouse.idle++;
+  const firing = !!man.weapon && man.alive && !state.playingRat && (queued.punch || keys.KeyF || mouse.fire);
+  const cursor = state.camMode === 'side' && mouse.aim && (mouse.fire || mouse.idle < 120);
+  let aimYaw = man.heading;
+  if (state.camMode === 'behind') aimYaw = state.camYaw;
+  else if (cursor) aimYaw = Math.atan2(mouse.aim.z - man.z, mouse.aim.x - man.x);
+  const aimLock = state.camMode === 'behind' || !!cursor;
+  // E picks up or throws (or puts the weapon down); while he's holding something, punch throws it too
+  if (queued.grab && man.weapon) putDown(0.6);
+  else if (queued.grab || (queued.punch && man.holding)) { grab(); queued.punch = false; }
   queued.grab = false;
-  if ((queued.punch || queued.kick || queued.round) && man.alive && !man.holding) {
+  if ((queued.kick || queued.round || (queued.punch && !man.weapon)) && man.alive && !man.holding) {
     // turn to face the nearest gangster in reach (for a click, only one roughly where it was aimed)
     let target = null, bestD = 1.6;
     const f = man.fwd;
@@ -63,9 +75,12 @@ function update() {
     }
     if (target) man.heading = Math.atan2(target.z - man.z, target.x - man.x);
   }
-  man.control(ix, iz, queued.jump, queued.punch, queued.round ? 'round' : queued.kick);
+  // with apples, holding the button keeps throwing (each throw is a punch)
+  const throwing = firing && man.weapon?.type === 'apples';
+  man.control(ix, iz, queued.jump, queued.punch || throwing, queued.round ? 'round' : queued.kick);
   queued.jump = queued.punch = queued.kick = queued.round = false;
   holdAtGate();
+  updateWeapons(firing && !!man.weapon, aimYaw, aimLock);
   if (wasDown && man.alive) man.invuln = 90;
 
   for (const g of gangsters) {
@@ -110,6 +125,7 @@ function render() {
   for (const g of gangsters) g.updateMeshes();
   renderCarry();
   const t = performance.now() / 1000;
+  renderWeapons(t);
   for (const c of liveChunks.values()) for (const animate of c.chillers) animate(t);
   renderGangs(t);
   renderBottles();
@@ -141,6 +157,6 @@ window.game = {
   roundKick() { queued.round = true; },
   grab() { queued.grab = true; },
   music, rats, setSkin, setPlayingRat, sewer,
-  state, wave, startBlock, spawnGangster, bottles, cars, flying,
+  state, wave, startBlock, spawnGangster, bottles, cars, flying, giveWeapon, pickups,
   set paused(v) { paused = v; }, get paused() { return paused; },
 };

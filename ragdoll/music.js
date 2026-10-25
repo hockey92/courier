@@ -232,6 +232,24 @@ export const music = (() => {
     else blip('square', 140, 60, t, 0.15, 0.05);
   }
 
-  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, honk, smash, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
+  // a rifle shot: a sharp crack of noise over a low thump
+  function bang() {
+    if (!ctx || !on) return;
+    const t = ctx.currentTime;
+    hiss(t, 0.1, 0.26, 900);
+    blip('square', 170, 45, t, 0.09, 0.07);
+  }
+  // the trigger on an empty magazine
+  function dryFire() { if (ctx && on) blip('square', 1900, 1300, ctx.currentTime, 0.03, 0.03); }
+
+  // an apple leaving his hand, and bouncing off someone's head
+  function whoosh() { if (ctx && on) hiss(ctx.currentTime, 0.12, 0.06, 2500); }
+  function bonk() {
+    if (!ctx || !on) return;
+    blip('triangle', 900, 320, ctx.currentTime, 0.12, 0.09);
+    hiss(ctx.currentTime, 0.05, 0.12, 1500);
+  }
+
+  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, honk, smash, bang, dryFire, whoosh, bonk, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
 })();
 addEventListener('pointerdown', () => music.start());

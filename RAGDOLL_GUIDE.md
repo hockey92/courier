@@ -25,10 +25,15 @@ the first block.
   steal a heart and run), Bruisers from 3 (shrug off punches), Bottle Throwers from 4 (hang back and
   lob bottles), and **Big Tony** every fifth block (a boss with a health bar and a charge that leaves
   him dizzy if he runs into something).
+- **Grab a weapon.** An AK-47 and a basket of apples float in the street a few steps into every block.
+  Walk over one to pick it up (it swaps for whatever you're holding), then **F** or left click fires
+  or throws where you aim: where the camera looks in the behind view (the rifle's laser shows where),
+  at the mouse cursor in the side view. Hold it down for full auto (30 rounds) or to keep throwing (12
+  apples). **E** puts it down; when it's empty it's back to fists.
 - **Chase a score.** The HUD shows the block, the street you're heading for, the crew left, hearts,
   your best number of blocks cleared (saved), knockouts and the run time.
 - **Change your look.** **C** or the ◀ ▶ buttons cycle the skins: New Yorker, Mamdani, Construction
-  Worker, Classic Ragdoll (saved).
+  Worker, Boardwalk Drifter, Classic Ragdoll (saved).
 - **Pick a camera.** **V** or the camera button switches between the over-the-shoulder behind view and
   the side-on street view (saved).
 - **Play as Pizza Rat.** **R** or the "Playing:" button hands the controls to the rat dragging a pizza
@@ -92,6 +97,9 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | `garbage.js` | wind and instanced litter | `updateGarbage`, `renderGarbage` |
 | `traffic.js` | cars driving both ways, braking, honking, hitting people, their collision boxes | `cars`, `LANES`, `updateTraffic`, `carBoxesNear` |
 | `carry.js` | picking up crates and trash cans, carrying, throwing, smashing (splinters, spilled litter) | `grab`, `updateCarry`, `renderCarry`, `flying` |
+| `guns.js` | the AK-47: its box model, firing where he aims (hitscan), the laser sight, tracers, muzzle flash, brass, recoil, tossing it when empty | `buildAk`, `trace`, `updateGun`, `updateGunFx`, `renderGun` |
+| `apples.js` | apples: the apple and basket models, the apple in his hand, throws, flight, bonks and splats | `buildApple`, `buildBasket`, `updateApples`, `updateAppleFx`, `renderApples` |
+| `weapons.js` | the weapons list, a pickup of each on every block, taking / swapping / putting down, and handing each frame to the weapon in his hands | `WEAPONS`, `pickups`, `giveWeapon`, `putDown`, `updateWeapons`, `renderWeapons` |
 | `combat.js` | kinds of gangster, spawning, their brains, Big Tony's charge, landing hits, stomps, clearing away the knocked out, getting busted | `GANG_TYPES`, `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `hurtMan`, `updateGangs`, `renderGangs`, `behind` |
 | `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
 | `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wavePlan`, `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
@@ -180,7 +188,8 @@ one-line description and explicit imports. Files are listed from the bottom of t
 ### Persistence and debugging
 - `localStorage` keys: `ragdollBestBlocks`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
 - `window.game` exposes `man, gangsters, update, render, keys, boxesNear, jump(), punch(), kick(),
-  roundKick(), music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles, paused`.
+  roundKick(), music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles,
+  giveWeapon('ak' | 'apples', ammo), pickups, paused`.
   Add new systems here so they can be driven from the console.
 
 ## 5. World
@@ -224,6 +233,60 @@ one-line description and explicit imports. Files are listed from the bottom of t
 - In flight it tumbles and smashes on the first gangster (`hurtGangster` with its damage and power),
   box (crates, walls, cars) or the ground. Crates burst into splinters; trash cans lose their lid and
   fling 10 pieces of litter (`garbage`) out of the pool.
+
+### Weapons (`weapons.js`, `guns.js`, `apples.js`)
+- `WEAPONS` lists them: the AK-47 (`ak`, 30 rounds, pickup 7 m into each block) and a basket of
+  apples (`apples`, 12, at 13 m). Every time `state.block` changes, each `pickups[type]` is placed at
+  z = 0.6 (the middle strip, nudged along x clear of boxes) with a full load; they float, turn and
+  glow. Walking within 0.7 m takes one (not while carrying a crate, not as the rat):
+  `man.weapon = { type, ammo, cooldown }`. Taking the kind he already holds keeps the fuller load
+  ("Reloaded!" / "More apples!"); taking the other kind puts what he held down where he stands. One
+  weapon at a time, so `man.rifle` (`weapon.type === 'ak'`) is what the pose checks.
+- **Aiming is by hand, no assist.** `main.js` works out `aimYaw`: the camera (`camYaw`) in the behind
+  view; in the side view the cursor while the mouse is in use (`mouse.aim`, on a plane at chest height
+  1.3 m so pointing at someone's body aims at him, used while the button is held or for 120 frames
+  after the mouse last moved, `mouse.idle`); otherwise his heading. `aimLock` (behind view, or the
+  cursor in use) keeps him facing the aim even when not firing; otherwise only while firing.
+  `updateWeapons` then sets `man.heading = aimYaw` and `man.aiming`, so `control()` doesn't turn him
+  the way he runs: he strafes and backs off facing his aim. On the keyboard in the side view he turns
+  as he runs and shoots where he faces.
+- `firing` is `queued.punch`, F held or the left button held (`mouse.fire`). **E** puts the weapon
+  down 0.6 m ahead; getting knocked down drops it where he stood. Either way it keeps its ammo and
+  `pickup.wait` stops him picking it straight back up until he's been 1.2 m away.
+
+### The AK-47 (`guns.js`)
+- While he holds it the punch button fires instead (`control()` drops `punch`): every `FIRE_GAP = 6`
+  frames unless he's stunned. A shot is hitscan from the muzzle (`trace`), level along his heading with
+  ±0.015 rad spread, stopped by any collision box it passes under the top of, or the first standing
+  gangster within 0.3 m × `bulk` of the line whose body (0.1–2 m above his feet) is at the muzzle's
+  height. A hit is `hurtGangster(g, 1, 0.8, …, punch = true)`, so armored kinds and a dizzy Big Tony
+  take the damage without flinching. Each shot shows a 3-frame tracer, a muzzle flash with a
+  `PointLight`, ejects a brass case to his right, jolts both hands back and up (recoil through the
+  physics), shakes the camera a little and plays `music.bang()`.
+- The **laser sight** (`laser`, `laserDot`) runs the same `trace` every frame from the muzzle and
+  shows exactly where a shot would stop.
+- Pulling the trigger on an empty magazine clicks (`music.dryFire()`), tosses the rifle to his right
+  (`tossed`, blinks out after 100 frames) and says "Out of ammo!".
+- The pose: the arms only bend in their own side planes, 0.4 m apart, so shouldering it takes three
+  things together. The shoulders blade (`twist` −0.4, left shoulder forward), the right arm hangs with
+  the forearm folded up to the grip (a 0.05, bend 2.1) and the left reaches forward (a 1.3, bend 0.1).
+  Each arm also turns about the neck (right +0.6, left −0.1). That puts both hands 15 cm below the
+  neck and 0.33 m apart on one line, and the held model is placed from the right hand towards the
+  left. It eases out in the flip's tuck.
+
+### Apples (`apples.js`)
+- Holding apples, the punch is an overarm throw: `control()` sets `punchStyle = 'throw'`, `punchW` adds
+  `APPLE_WIND = 5` frames, and the pose cocks the arm up with the hand behind the head (a 3.4, bend 1.3)
+  before whipping it over the top (a 1.9, bend 0.1), the shoulder drawn back then driven through.
+  Throws still alternate hands; holding the button keeps throwing (`main.js` passes `punch` while
+  `firing`), about one every 14 frames.
+- On the frame the arm is out (`punchHit`), `updateApples` takes the hit for itself (so the fist
+  doesn't land) and lets an apple go from that hand along his heading at `APPLE_SPEED = 0.3` m/frame
+  plus his own speed, with `APPLE_LIFT = 0.05` up: about 10 m before it comes down. `heldApple` sits
+  in whichever hand throws next.
+- In flight (a pool of 10) it bonks the first standing gangster it reaches (`hurtGangster(g, 1, 1, …)`,
+  which staggers even bruisers, and `music.bonk()`), or splats on a box or the ground (`music.plop()`)
+  into red-and-cream bits. "Out of apples!" when the last one goes.
 
 ### Traffic
 - `traffic.js`: 3 cars per lane (60% taxis) loop within ±80 m of `camX`, re-entering out of sight at
@@ -282,6 +345,10 @@ Three layers, kept separate on purpose:
    constraints, ground friction and obstacle push-out. See "The physics, briefly" below.
 
 `updateMeshes()` (called from `render`) stretches a box between joint pairs with `orient()`.
+
+Where a ragdoll lives comes from its `world` option: `{ boxesNear, floorAt, zMin, zMax, step }`
+(`step` is the tallest ledge it walks straight up onto). It defaults to `GAME_WORLD`, the game's street;
+`montague.js` passes its own so the hero can walk Montague St (§16).
 
 ### Attacks
 - `Ragdoll.swing(t, windup, hold, back)` turns an attack timer into `[wind, ext]` amounts (0…1):
@@ -358,6 +425,8 @@ waking him. A kick during the wind-up staggers him out of it.
 | Kick | wind-up 6 (`KICK_WINDUP`), 2 damage, reach 1.2 m, vertical reach 1.7 m (flying kicks) | reach 1.2 m |
 | Round kick | wind-up 10, spin 20, 2 damage, power 2.4, reach 1.4 m in front and to the sides | — |
 | Stomp | landing 1.25–1.95 m above a gangster's feet knocks him out (Big Tony: 3 damage) | — |
+| AK-47 | 30 rounds, 10 a second, 1 damage, power 0.8 (no flinch for armored kinds), range 30 m | — |
+| Apples | 12, about 4 a second, 1 damage, power 1 (staggers everyone), about 10 m | — |
 | Between attacks | — | `gap`–2×`gap` frames divided by `aggro` (1 + 0.05 per block); picks next move ahead |
 
 The man's knockback from a gangster's hit is multiplied by `√mass`. `behind()` spawns gangsters just
@@ -419,8 +488,12 @@ mySkin: {
   hands with cuffs.
 - Order matters only for the picker: `SKIN_ORDER = Object.keys(SKINS)`. Adding an entry is enough to
   make it selectable (◀ ▶ buttons or **C**); the choice is saved.
-- Props that need to follow a joint without rotating with it (the coffee cup) are placed in
-  `updateMeshes()`; set them in `decorate` (e.g. `r.cup`) and handle them there.
+- Props that need to follow a joint without rotating with it are placed in `updateMeshes()`; set them
+  in `decorate` and handle them there. `r.cup` (the New Yorker's coffee, left hand) and `r.bag` (the
+  Boardwalk Drifter's duffel, hanging just outside the right hand, hidden while he holds the rifle or
+  a crate) are the two so far.
+- Legs point down, so on thighs and shins `+x` is the *back*; put things on the front of the jeans at
+  `-x` (`r.parts.thighL` etc. are already built when `decorate` runs).
 - Likenesses of real people stay respectful, cartoonish and "a bit like" — no caricatured features.
 
 ## 8. Cameras and controls
@@ -435,7 +508,8 @@ help bar from `HELP_MOVE[mode]` + `HELP_REST`.
 | ↑ ↓ / W S | run forward / back | move across the street |
 | Space | jump, again in the air to flip | same |
 | F / G / H | punch / kick / round kick (auto-turns to the nearest gangster) | same |
-| E | pick up the crate or trash can you're next to; E again (or F) throws it | same |
+| E | pick up the crate or trash can you're next to; E again (or F) throws it; with a weapon, puts it down | same |
+| F held / left button held | with the AK-47 full auto, with apples one throw after another, where the camera looks (the laser shows where shots go) | at the mouse cursor while you're using the mouse, otherwise where he faces |
 | Mouse | the first click grabs the mouse (pointer lock, Esc lets go); moving it left/right turns him and the camera (`mouse.turn`, 0.0035 rad per pixel). Clicks attack where he faces: left click punch (or throw what he's holding), right click kick, middle or Shift+left click round kick | the mouse stays free; the same clicks turn him to face the spot clicked, then to the nearest gangster in reach within 60° of it |
 | C / V / M | next skin / switch camera / sound on-off | same |
 | R | play as Pizza Rat (see below) / back to the man | same |
@@ -609,3 +683,20 @@ const place = (g, x, z) => { const sx = x - g.x, sz = z - g.z; g.x = x; g.z = z;
 7. Update the help text (`HELP_MOVE` / `HELP_REST`) for new controls.
 8. Reload, check the console, verify visually and with a scripted scenario.
 9. Update this guide.
+
+## 16. Montague St (`montague.html`, `ragdoll/montague.js`)
+
+A separate page, not part of the game: Montague St by Borough Hall in Brooklyn, rebuilt from a Street View
+photo with the game's helpers (`scene.js`, `addBox`, `mat`, `canvasTex`, `limb`), relit as an overcast day.
+The game's hero walks it in his saved skin.
+
+- Same axes as the game, with the photo looking along +x. Road z -4.5 … 4.5, left sidewalk out to the
+  facades at -10, right sidewalk to the building-site fence at 8.7; sidewalks are 0.15 m up.
+- `block()` builds a building with a tiled facade (one bay × one floor per tile) and adds its collision
+  box; everything else solid calls `solid()` / `around()`. Its `floorAt` lets him step up `STEP = 0.2` m,
+  so he walks up the curbs.
+- Importing `ragdoll.js` brings in `world.js`, `traffic.js` and `music.js`. The page removes the game's
+  traffic from the scene and starts with the music off (**M** turns it on).
+- Cameras: `walk` (over the shoulder, like the behind view) and `look` (free, Street View style; **R**
+  goes back to the photo's viewpoint); **V** switches. `window.street` exposes `hero`, `tick`, `boxes`,
+  `setMode` and `resetView`.
