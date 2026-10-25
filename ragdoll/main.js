@@ -27,6 +27,7 @@ function update() {
     // the keys drive the rat; the man just stands there taking a break
     state.ratPlayer.input = { turn: right, go: -down, hop: queued.jump, bite: queued.punch };
     queued.jump = queued.punch = queued.kick = queued.round = queued.grab = false;
+    queued.aim = null;
     ix = iz = 0;
   } else if (state.camMode === 'behind') {
     // steer: left/right turn him and the camera, up runs where the camera looks, down runs back towards it
@@ -39,14 +40,23 @@ function update() {
     }
   }
   const wasDown = !man.alive;
+  // a mouse attack turns him to face where it was clicked
+  const aimed = queued.aim && man.alive && (queued.punch || queued.kick || queued.round);
+  if (aimed) {
+    const ax = queued.aim.x - man.x, az = queued.aim.z - man.z;
+    if (Math.hypot(ax, az) > 0.3) man.heading = Math.atan2(az, ax);
+  }
+  queued.aim = null;
   // E picks up or throws; while he's holding something, punch throws it too
   if (queued.grab || (queued.punch && man.holding)) { grab(); queued.punch = false; }
   queued.grab = false;
   if ((queued.punch || queued.kick || queued.round) && man.alive && !man.holding) {
-    // turn to face the nearest gangster in reach
+    // turn to face the nearest gangster in reach (for a click, only one roughly where it was aimed)
     let target = null, bestD = 1.6;
+    const f = man.fwd;
     for (const g of gangsters) {
-      const d = Math.hypot(g.x - man.x, g.z - man.z);
+      const dx = g.x - man.x, dz = g.z - man.z, d = Math.hypot(dx, dz);
+      if (aimed && d > 0.01 && (dx * f.x + dz * f.z) / d < 0.5) continue;
       if (g.alive && d < bestD && Math.abs(g.y - man.y) < 0.9) { target = g; bestD = d; }
     }
     if (target) man.heading = Math.atan2(target.z - man.z, target.x - man.x);
