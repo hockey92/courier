@@ -9,19 +9,21 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
-    background: #2b2d33;
-    font-family: system-ui, -apple-system, sans-serif;
+    background: #c79d63;
+    font-family: Georgia, "Times New Roman", serif;
   }
   canvas { display: block; }
   #hud {
     position: fixed;
     top: 12px;
     left: 16px;
-    padding: 6px 12px;
-    border-radius: 8px;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
+    padding: 6px 14px;
+    border: 2px solid #8a5d36;
+    border-radius: 6px;
+    background: rgba(62, 39, 20, 0.85);
+    color: #f3e5ab;
     font-size: 18px;
+    font-weight: bold;
     user-select: none;
   }
   #overlay {
@@ -31,20 +33,31 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #fff;
-    background: rgba(0, 0, 0, 0.6);
+    padding: 0 24px;
+    color: #f3e5ab;
+    background: rgba(40, 22, 8, 0.75);
     text-align: center;
   }
-  #overlay h1 { font-size: 48px; margin: 0 0 12px; }
-  #overlay p { font-size: 18px; margin: 6px 0; opacity: 0.85; }
+  #overlay h1 {
+    font-size: 52px;
+    margin: 0 0 12px;
+    color: #f3c76b;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    text-shadow: 3px 3px 0 #5e3d22;
+  }
+  #overlay p { font-size: 18px; margin: 6px 0; opacity: 0.9; }
   #overlay button {
     margin-top: 20px;
-    padding: 12px 32px;
+    padding: 12px 36px;
+    font-family: inherit;
     font-size: 20px;
-    border: none;
-    border-radius: 999px;
-    background: #4fd1c5;
-    color: #0d0f1a;
+    font-weight: bold;
+    letter-spacing: 2px;
+    border: 3px solid #5e3d22;
+    border-radius: 6px;
+    background: #c8862e;
+    color: #2b1a0a;
     cursor: pointer;
   }
   .hidden { display: none !important; }
@@ -55,9 +68,9 @@
 <div id="hud">Score: <span id="score">0</span> &nbsp; Lives: <span id="lives">3</span> &nbsp; Shots: <span id="shots">x1</span></div>
 <div id="overlay">
   <h1>Zombie Maze</h1>
-  <p>You are lost in the endless streets of a zombie-infested New York. You shoot automatically at any zombie you can see.</p>
-  <p>They close in from around every block. Move with WASD or the arrow keys.</p>
-  <p>Grab the purple bonuses to fire more bullets at once.</p>
+  <p>You are lost in an endless frontier town overrun by zombies. You shoot automatically at any zombie you can see.</p>
+  <p>They shuffle in from beyond every corner. Move with WASD or the arrow keys.</p>
+  <p>Grab the gold sheriff stars to fire more bullets at once.</p>
   <button id="start">Play</button>
 </div>
 
@@ -181,13 +194,23 @@ function leftWall(c, r) {
   return getChunk(cx, cy).v[r - cy * CHUNK][c - cx * CHUNK];
 }
 
-// ---------- New York look ----------
-// Walls are drawn as rows of buildings and corridors as streets. Every detail is
-// derived from a hash of the wall's world position, so a building that overlaps
-// two chunks is drawn identically in both and the chunk images tile seamlessly.
+// ---------- Wild West look ----------
+// Walls are drawn as rows of frontier buildings and corridors as dirt roads. Every
+// detail is derived from a hash of the wall's or cell's world position, so a
+// building that overlaps two chunks is drawn identically in both and the chunk
+// images tile seamlessly.
 
-const ASPHALT = "#2b2d33";
-const ROOFS = ["#8a4b3c", "#6b4a3a", "#7a7d82", "#a68a6d", "#4a4a4f", "#5b6470", "#94573f"];
+const GROUND = "#c79d63";
+const ROOFS = [
+  { color: "#7a5230", type: "wood" },
+  { color: "#8c6239", type: "wood" },
+  { color: "#5e3d22", type: "wood" },
+  { color: "#8e3b2a", type: "wood" },
+  { color: "#8a8f94", type: "tin" },
+  { color: "#c98d5a", type: "adobe" },
+  { color: "#b97a4a", type: "adobe" },
+];
+const SIGNS = ["SALOON", "BANK", "SHERIFF", "HOTEL", "JAIL", "BARBER", "STABLE", "SALOON", "POST"];
 
 function hash(a, b, salt) {
   let h = worldSeed ^ Math.imul(a, 0x27d4eb2d) ^ Math.imul(b, 0x165667b1) ^ Math.imul(salt, 0x9e3779b1);
@@ -202,36 +225,58 @@ function wallRect(c, r, vertical) {
     : { x: c * CELL - WALL / 2, y: r * CELL - WALL / 2, w: CELL + WALL, h: WALL, c, r, o: 0 };
 }
 
-function drawStreets(m, chunk) {
+function drawGround(m, chunk) {
   const c0 = chunk.cx * CHUNK, r0 = chunk.cy * CHUNK;
-  m.fillStyle = ASPHALT;
+  m.fillStyle = GROUND;
   m.fillRect(c0 * CELL, r0 * CELL, CHUNK * CELL, CHUNK * CELL);
 
-  const inner = WALL / 2 + SIDEWALK + 2;
   for (let r = r0; r < r0 + CHUNK; r++) {
     for (let c = c0; c < c0 + CHUNK; c++) {
-      const up = !topWall(c, r), down = !topWall(c, r + 1);
-      const left = !leftWall(c, r), right = !leftWall(c + 1, r);
       const x0 = c * CELL, y0 = r * CELL;
       const mx = x0 + CELL / 2, my = y0 + CELL / 2;
 
-      if (up + down + left + right >= 3) {
-        m.fillStyle = "rgba(225, 225, 225, 0.8)";
-        for (let s = inner; s + 4 <= CELL - inner; s += 8) {
-          if (right) m.fillRect(x0 + CELL - 14, y0 + s, 11, 4);
-          if (left) m.fillRect(x0 + 3, y0 + s, 11, 4);
-          if (down) m.fillRect(x0 + s, y0 + CELL - 14, 4, 11);
-          if (up) m.fillRect(x0 + s, y0 + 3, 4, 11);
-        }
-      } else {
-        m.fillStyle = "#d9a62e";
-        for (const d of [4, 22]) {
-          if (right) m.fillRect(mx + d, my - 1, 12, 2);
-          if (left) m.fillRect(mx - d - 12, my - 1, 12, 2);
-          if (down) m.fillRect(mx - 1, my + d, 2, 12);
-          if (up) m.fillRect(mx - 1, my - d - 12, 2, 12);
+      for (let i = 0; i < 10; i++) {
+        const x = x0 + hash(c, r, 40 + i) * CELL;
+        const y = y0 + hash(c, r, 60 + i) * CELL;
+        m.fillStyle = hash(c, r, 80 + i) < 0.5 ? "rgba(120, 80, 40, 0.25)" : "rgba(255, 240, 200, 0.25)";
+        m.fillRect(x, y, 2, 2);
+      }
+
+      m.fillStyle = "rgba(110, 72, 36, 0.3)";
+      for (const off of [-8, 6]) {
+        if (!leftWall(c + 1, r)) m.fillRect(mx, my + off, CELL / 2, 2.5);
+        if (!leftWall(c, r)) m.fillRect(x0, my + off, CELL / 2, 2.5);
+        if (!topWall(c, r + 1)) m.fillRect(mx + off, my, 2.5, CELL / 2);
+        if (!topWall(c, r)) m.fillRect(mx + off, y0, 2.5, CELL / 2);
+      }
+
+      if (hash(c, r, 30) < 0.06) {
+        const tx = mx + (hash(c, r, 31) - 0.5) * 24;
+        const ty = my + (hash(c, r, 32) - 0.5) * 24;
+        circle(tx + 2, ty + 3, 6, "rgba(0, 0, 0, 0.2)", m);
+        m.strokeStyle = "#8d6e3f";
+        m.lineWidth = 1.2;
+        for (let k = 0; k < 4; k++) {
+          m.beginPath();
+          m.ellipse(tx, ty, 6, 3.5, k * 0.8 + hash(c, r, 33), 0, Math.PI * 2);
+          m.stroke();
         }
       }
+    }
+  }
+}
+
+function drawBoardwalks(m, ws) {
+  m.fillStyle = "#4e3320";
+  for (const w of ws) m.fillRect(w.x - SIDEWALK - 1, w.y - SIDEWALK - 1, w.w + SIDEWALK * 2 + 2, w.h + SIDEWALK * 2 + 2);
+  m.fillStyle = "#8a5d36";
+  for (const w of ws) m.fillRect(w.x - SIDEWALK, w.y - SIDEWALK, w.w + SIDEWALK * 2, w.h + SIDEWALK * 2);
+  m.fillStyle = "rgba(0, 0, 0, 0.25)";
+  for (const w of ws) {
+    if (w.o === 0) {
+      for (let x = w.x - SIDEWALK; x < w.x + w.w + SIDEWALK; x += 5) m.fillRect(x, w.y - SIDEWALK, 1, w.h + SIDEWALK * 2);
+    } else {
+      for (let y = w.y - SIDEWALK; y < w.y + w.h + SIDEWALK; y += 5) m.fillRect(w.x - SIDEWALK, y, w.w + SIDEWALK * 2, 1);
     }
   }
 }
@@ -243,59 +288,124 @@ function drawBuilding(m, w) {
     ? [w.x + t * w.w, w.y + w.h / 2 + off]
     : [w.x + w.w / 2 + off, w.y + t * w.h];
 
-  m.fillStyle = ROOFS[Math.floor(h(1) * ROOFS.length)];
+  const roof = ROOFS[Math.floor(h(1) * ROOFS.length)];
+  m.fillStyle = roof.color;
   m.fillRect(w.x, w.y, w.w, w.h);
-  m.fillStyle = "rgba(255, 255, 255, 0.1)";
-  m.fillRect(w.x, w.y, w.w, 2);
-  m.fillRect(w.x, w.y, 2, w.h);
-  m.strokeStyle = "rgba(0, 0, 0, 0.35)";
-  m.lineWidth = 2;
-  m.strokeRect(w.x + 2, w.y + 2, w.w - 4, w.h - 4);
+
+  if (roof.type === "adobe") {
+    m.fillStyle = "rgba(255, 255, 255, 0.12)";
+    m.fillRect(w.x + 3, w.y + 3, w.w - 6, w.h - 6);
+    m.fillStyle = "#4e3320";
+    const step = 12;
+    if (horizontal) {
+      for (let x = w.x + 8; x < w.x + w.w - 4; x += step) {
+        m.fillRect(x, w.y - 1, 2.5, 3);
+        m.fillRect(x, w.y + w.h - 2, 2.5, 3);
+      }
+    } else {
+      for (let y = w.y + 8; y < w.y + w.h - 4; y += step) {
+        m.fillRect(w.x - 1, y, 3, 2.5);
+        m.fillRect(w.x + w.w - 2, y, 3, 2.5);
+      }
+    }
+  } else {
+    m.fillStyle = "rgba(0, 0, 0, 0.2)";
+    if (horizontal) m.fillRect(w.x, w.y + w.h / 2, w.w, w.h / 2);
+    else m.fillRect(w.x + w.w / 2, w.y, w.w / 2, w.h);
+
+    m.fillStyle = roof.type === "tin" ? "rgba(255, 255, 255, 0.18)" : "rgba(0, 0, 0, 0.18)";
+    const step = roof.type === "tin" ? 3 : 6;
+    if (horizontal) {
+      for (let x = w.x + step; x < w.x + w.w; x += step) m.fillRect(x, w.y, 1, w.h);
+    } else {
+      for (let y = w.y + step; y < w.y + w.h; y += step) m.fillRect(w.x, y, w.w, 1);
+    }
+
+    m.fillStyle = "rgba(0, 0, 0, 0.4)";
+    if (horizontal) m.fillRect(w.x, w.y + w.h / 2 - 1, w.w, 2);
+    else m.fillRect(w.x + w.w / 2 - 1, w.y, 2, w.h);
+  }
+
+  m.strokeStyle = "rgba(40, 20, 5, 0.55)";
+  m.lineWidth = 1.5;
+  m.strokeRect(w.x + 0.75, w.y + 0.75, w.w - 1.5, w.h - 1.5);
 
   if (h(2) < 0.5) {
     const [sx, sy] = at(0.3 + h(3) * 0.4, 0);
-    m.fillStyle = "rgba(0, 0, 0, 0.4)";
-    if (horizontal) m.fillRect(sx - 1, w.y + 2, 2, w.h - 4);
-    else m.fillRect(w.x + 2, sy - 1, w.w - 4, 2);
+    m.fillStyle = "rgba(40, 20, 5, 0.6)";
+    if (horizontal) m.fillRect(sx - 1, w.y, 2, w.h);
+    else m.fillRect(w.x, sy - 1, w.w, 2);
   }
 
-  const kind = h(4);
-  if (kind < 0.35) {
-    const [x, y] = at(0.2 + h(5) * 0.6, 0);
-    circle(x + 2, y + 2, 6.5, "rgba(0, 0, 0, 0.35)", m);
-    circle(x, y, 6.5, "#7b5e45", m);
-    m.strokeStyle = "#3e2723";
-    m.lineWidth = 1.5;
-    m.stroke();
-    circle(x, y, 2.5, "#5d4037", m);
-  } else if (kind < 0.8) {
-    const count = 1 + Math.floor(h(6) * 3);
-    for (let i = 0; i < count; i++) {
-      const [x, y] = at(0.18 + i * 0.27 + h(7 + i) * 0.08, (h(10 + i) - 0.5) * 6);
-      m.fillStyle = "#b0bec5";
-      m.fillRect(x - 3.5, y - 3, 7, 6);
-      m.strokeStyle = "#546e7a";
-      m.lineWidth = 1;
-      m.strokeRect(x - 3.5, y - 3, 7, 6);
-    }
-  } else {
-    const [x, y] = at(0.3 + h(13) * 0.4, 0);
-    m.fillStyle = "rgba(144, 202, 249, 0.55)";
-    m.fillRect(x - 5, y - 4, 10, 8);
+  if (roof.type !== "adobe" && h(4) < 0.4) {
+    const [x, y] = at(0.15 + h(5) * 0.7, -4);
+    m.fillStyle = "rgba(0, 0, 0, 0.35)";
+    m.fillRect(x - 2, y - 1, 7, 7);
+    m.fillStyle = "#7b2e1f";
+    m.fillRect(x - 3.5, y - 3.5, 7, 7);
+    m.fillStyle = "#2b1a12";
+    m.fillRect(x - 1.5, y - 1.5, 3, 3);
+  }
+
+  if (roof.type === "wood" && h(6) < 0.25) {
+    const text = SIGNS[Math.floor(h(7) * SIGNS.length)];
+    const [x, y] = at(0.5, 0);
+    m.save();
+    m.translate(x, y);
+    if (!horizontal) m.rotate(-Math.PI / 2);
+    m.font = "bold 10px Georgia, serif";
+    m.textAlign = "center";
+    m.textBaseline = "middle";
+    m.fillStyle = "rgba(0, 0, 0, 0.5)";
+    m.fillText(text, 1, 1);
+    m.fillStyle = "#f3e5ab";
+    m.fillText(text, 0, 0);
+    m.restore();
   }
 }
 
-function drawTree(m, w) {
+function drawProp(m, w) {
   const h = salt => hash(w.c * 2 + w.o, w.r, salt);
-  if (h(20) > 0.4) return;
+  if (h(20) > 0.45) return;
   const side = h(21) < 0.5 ? -1 : 1;
   const t = 0.25 + h(22) * 0.5;
-  const off = side * (WALL / 2 + 4);
+  const off = side * (WALL / 2 + 7);
   const x = w.o === 0 ? w.x + t * w.w : w.x + w.w / 2 + off;
   const y = w.o === 0 ? w.y + w.h / 2 + off : w.y + t * w.h;
-  circle(x + 2, y + 2, 6, "rgba(0, 0, 0, 0.35)", m);
-  circle(x, y, 6, "#2e7d32", m);
-  circle(x - 1.5, y - 1.5, 3, "#43a047", m);
+  const kind = h(23);
+
+  if (kind < 0.4) {
+    circle(x + 2, y + 3, 5.5, "rgba(0, 0, 0, 0.3)", m);
+    circle(x - 5, y + 1, 2.5, "#3f7a30", m);
+    circle(x + 5, y - 1, 2.5, "#3f7a30", m);
+    circle(x, y, 5, "#4c8c3a", m);
+    m.strokeStyle = "#6fb05a";
+    m.lineWidth = 1;
+    m.beginPath();
+    m.moveTo(x - 4, y); m.lineTo(x + 4, y);
+    m.moveTo(x, y - 4); m.lineTo(x, y + 4);
+    m.stroke();
+    m.fillStyle = "#f0e6c8";
+    for (const [dx, dy] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]) m.fillRect(x + dx, y + dy, 1, 1);
+  } else if (kind < 0.75) {
+    circle(x + 2, y + 3, 5, "rgba(0, 0, 0, 0.3)", m);
+    circle(x, y, 5, "#7b4a24", m);
+    m.strokeStyle = "#3e2a17";
+    m.lineWidth = 1.2;
+    m.stroke();
+    m.beginPath();
+    m.arc(x, y, 3, 0, Math.PI * 2);
+    m.stroke();
+    circle(x - 1, y - 1, 1.2, "#a06a3a", m);
+  } else {
+    m.fillStyle = "rgba(0, 0, 0, 0.3)";
+    m.fillRect(x - 3, y - 1, 11, 8);
+    m.fillStyle = "#d8b04c";
+    m.fillRect(x - 5, y - 3.5, 10, 7);
+    m.fillStyle = "#a67c2e";
+    m.fillRect(x - 5, y - 1.5, 10, 1);
+    m.fillRect(x - 5, y + 1.5, 10, 1);
+  }
 }
 
 function chunkCanvas(chunk) {
@@ -310,7 +420,7 @@ function chunkCanvas(chunk) {
   m.rect(ox, oy, size, size);
   m.clip();
 
-  drawStreets(m, chunk);
+  drawGround(m, chunk);
 
   const c0 = chunk.cx * CHUNK, r0 = chunk.cy * CHUNK;
   const ws = [];
@@ -321,17 +431,14 @@ function chunkCanvas(chunk) {
     }
   }
 
-  m.fillStyle = "#44474d";
-  for (const w of ws) m.fillRect(w.x - SIDEWALK - 1, w.y - SIDEWALK - 1, w.w + SIDEWALK * 2 + 2, w.h + SIDEWALK * 2 + 2);
-  m.fillStyle = "#6e727a";
-  for (const w of ws) m.fillRect(w.x - SIDEWALK, w.y - SIDEWALK, w.w + SIDEWALK * 2, w.h + SIDEWALK * 2);
+  drawBoardwalks(m, ws);
 
-  m.fillStyle = "rgba(0, 0, 0, 0.35)";
+  m.fillStyle = "rgba(60, 30, 5, 0.35)";
   m.beginPath();
   for (const w of ws) m.rect(w.x + 5, w.y + 7, w.w, w.h);
   m.fill();
 
-  for (const w of ws) drawTree(m, w);
+  for (const w of ws) drawProp(m, w);
   for (const w of ws) drawBuilding(m, w);
 
   chunk.canvas = cv;
@@ -537,6 +644,7 @@ function pick(list) {
 
 const ZOMBIE_SHIRTS = ["#5d4037", "#455a64", "#6a1b9a", "#33691e", "#78909c", "#8d6e63", "#7f1d1d"];
 const ZOMBIE_PANTS = ["#3e2723", "#263238", "#37474f", "#4e342e"];
+const ZOMBIE_HATS = ["#4e342e", "#3b2a1e", "#6d5a45", "#2b2b2b"];
 
 function updateShotsHud() {
   shotsEl.textContent = shots > 1 ? `x${shots} (${Math.ceil(shotsTimer)}s)` : "x1";
@@ -583,6 +691,7 @@ function spawnEnemy() {
       pants: pick(ZOMBIE_PANTS),
       walk: Math.random() * Math.PI * 2,
       flash: 0,
+      hat: Math.random() < 0.4 ? pick(ZOMBIE_HATS) : null,
     });
     return;
   }
@@ -720,7 +829,7 @@ function update(dt) {
       bonus.life = 0;
       shots = Math.min(MAX_SHOTS, shots + 1);
       shotsTimer = BONUS_DURATION;
-      explode(bonus.x, bonus.y, "#b388ff", 20);
+      explode(bonus.x, bonus.y, "#ffca28", 20);
     }
   }
   bonuses = bonuses.filter(b => b.life > 0);
@@ -816,7 +925,7 @@ function circle(x, y, r, color, g = ctx) {
 
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = ASPHALT;
+  ctx.fillStyle = GROUND;
   ctx.fillRect(0, 0, W, H);
   ctx.translate(-Math.round(camX), -Math.round(camY));
 
@@ -836,20 +945,27 @@ function draw() {
   for (const bonus of bonuses) {
     const fading = bonus.life < 2 && Math.floor(bonus.life * 8) % 2 === 0;
     if (fading) continue;
-    const pulse = 1 + Math.sin(elapsed * 6) * 0.12;
-    const r = bonus.r * pulse;
-    ctx.shadowColor = "#b388ff";
-    ctx.shadowBlur = 20;
-    circle(bonus.x, bonus.y, r, "#7c4dff");
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 3;
+    const r = bonus.r * (1 + Math.sin(elapsed * 6) * 0.12);
+    ctx.save();
+    ctx.translate(bonus.x, bonus.y);
+    ctx.rotate(Math.sin(elapsed * 2) * 0.3);
     ctx.beginPath();
-    ctx.moveTo(bonus.x - r * 0.5, bonus.y);
-    ctx.lineTo(bonus.x + r * 0.5, bonus.y);
-    ctx.moveTo(bonus.x, bonus.y - r * 0.5);
-    ctx.lineTo(bonus.x, bonus.y + r * 0.5);
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const len = i % 2 === 0 ? r * 1.25 : r * 0.55;
+      ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+    }
+    ctx.closePath();
+    ctx.shadowColor = "#ffe082";
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = "#ffca28";
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#8d6e00";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
+    circle(0, 0, r * 0.3, "#ffe9a8");
+    ctx.restore();
   }
 
   const blink = invulnerable > 0 && Math.floor(invulnerable * 10) % 2 === 0;
@@ -1007,10 +1123,23 @@ function drawZombie(e) {
   ctx.translate(1, -11);
   ctx.rotate(0.25);
   circle(0, 0, 6, e.skin);
-  ctx.fillStyle = "#1b1b1b";
-  ctx.fillRect(-5, -6, 3, 2);
-  ctx.fillRect(-1, -7, 2, 2);
-  ctx.fillRect(2, -6, 2, 2);
+  if (e.hat) {
+    ctx.fillStyle = e.hat;
+    ctx.beginPath();
+    ctx.roundRect(-4, -11, 8, 6, [3, 3, 0, 0]);
+    ctx.fill();
+    ctx.fillRect(-2.5, -12, 2, 1.5);
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 9, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillRect(-4, -7, 8, 1.2);
+  } else {
+    ctx.fillStyle = "#1b1b1b";
+    ctx.fillRect(-5, -6, 3, 2);
+    ctx.fillRect(-1, -7, 2, 2);
+    ctx.fillRect(2, -6, 2, 2);
+  }
   ctx.shadowColor = "#ff1744";
   ctx.shadowBlur = 6;
   circle(2.5, -1, 1.4, "#ff1744");
