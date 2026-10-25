@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ragdoll Man vs the Gangsters 3D</title>
+<link rel="stylesheet" href="ragdoll/style.css">
+</head>
+<body>
+<div id="fade"></div>
+<div id="hud"><div class="score" id="time">0.0s</div><div class="hearts" id="hearts"></div><div class="sub" id="sub"></div></div>
+<div id="busted">Busted!</div>
+<div id="skins"><span class="label">Skin</span><button id="skinPrev" title="Previous skin">◀</button><span id="skinName"></span><button id="skinNext" title="Next skin (C)">▶</button></div>
+<button id="camBtn"></button>
+<button id="playBtn">Playing: The Man (R)</button>
+<button id="streetBtn">↑ Back to the street</button>
+<div id="help">← → run · ↑ ↓ move up and down the street · Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · knock gangsters out with punches, kicks or a stomp on the head · they fight back, so watch your hearts! · C change skin · M sound on/off</div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module" src="ragdoll/main.js"></script>
+</body>
+</html>

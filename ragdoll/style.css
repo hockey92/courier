@@ -1,0 +1,21 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #141a3d; font-family: system-ui, sans-serif; }
+canvas { display: block; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+#hud { position: fixed; top: 14px; left: 18px; color: #fff; text-shadow: 0 2px 4px #0008; pointer-events: none; }
+#hud .score { font-size: 30px; font-weight: 800; }
+#hud .sub { font-size: 14px; opacity: .85; margin-top: 4px; }
+#skins { position: fixed; top: 14px; right: 18px; display: flex; align-items: center; gap: 8px; color: #fff;
+  background: #0006; padding: 6px 10px; border-radius: 10px; font-size: 14px; text-shadow: 0 1px 3px #000; user-select: none; }
+#skins .label { opacity: .7; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+#skinName { min-width: 150px; text-align: center; font-weight: 700; }
+#skins button { background: #fff2; color: #fff; border: 0; border-radius: 6px; width: 28px; height: 26px; cursor: pointer; font-size: 12px; }
+#skins button:hover { background: #fff4; }
+#camBtn, #playBtn, #streetBtn { position: fixed; top: 58px; right: 18px; background: #0006; color: #fff; border: 0; border-radius: 10px;
+  padding: 6px 12px; font: 600 13px system-ui, sans-serif; cursor: pointer; text-shadow: 0 1px 3px #000; }
+#playBtn { top: 94px; }
+#streetBtn { top: 130px; display: none; background: #2e6b45cc; }
+#camBtn:hover, #playBtn:hover { background: #000a; }
+#streetBtn:hover { background: #245437; }
+#hud .hearts { font-size: 22px; color: #ff4d5e; letter-spacing: 2px; margin-top: 2px; }
+#busted { position: fixed; top: 28%; width: 100%; text-align: center; color: #fff; font: 800 34px system-ui; text-shadow: 0 3px 8px #000a; pointer-events: none; display: none; }
+#help { position: fixed; bottom: 12px; width: 100%; text-align: center; color: #fffc; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; }
