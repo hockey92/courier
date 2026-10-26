@@ -48,6 +48,9 @@ the first block.
 - **Get back up.** Space at the ladder under the shaft of light climbs out next to the manhole, or the
   green "↑ Back to the street" button (top right, only shown underground) does it instantly.
   **R** returns to the man from anywhere.
+- **Zombie night.** **Z** or the "Zombie night" button swaps the blocks for endless zombie waves: they
+  shamble in from both ends of the street and follow the man wherever he goes, each wave bigger than
+  the last, with a breather and a heart in between (§6c).
 - **Sound.** An original 8-bit rock 'n' roll tune plus sound effects; **M** turns it all on or off.
 
 - **Tone:** playful, cartoony, affectionate about NYC. Nothing gory, nothing mean-spirited.
@@ -103,8 +106,9 @@ one-line description and explicit imports. Files are listed from the bottom of t
 | `apples.js` | apples: the apple and basket models, the apple in his hand, throws, flight, bonks and splats | `buildApple`, `buildBasket`, `updateApples`, `updateAppleFx`, `renderApples` |
 | `weapons.js` | the weapons list, a pickup of each on every block, taking / swapping / putting down, and handing each frame to the weapon in his hands | `WEAPONS`, `pickups`, `giveWeapon`, `putDown`, `updateWeapons`, `renderWeapons` |
 | `combat.js` | kinds of gangster, spawning, their brains, Big Tony's charge, landing hits, stomps, clearing away the knocked out, getting busted | `GANG_TYPES`, `spawnGangster`, `gangsterBrain`, `resolvePunches`, `checkHits`, `hurtMan`, `updateGangs`, `renderGangs`, `behind` |
-| `ui.js` | skin picker, camera switch, man/rat switch, help bar, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
-| `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting | `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun` |
+| `ui.js` | skin picker, camera switch, man/rat switch, HUD, banner, boss bar | `setSkin`, `setCamMode`, `setPlayingRat`, `updateHud` |
+| `zombies.js` | zombie night: each wave's horde, spawning them at both ends of the street, the breather between waves | `horde`, `hordePlan`, `startHorde`, `updateHorde` |
+| `blocks.js` | the run: block waves, the red-light gate, clearing a block, busted and restarting, switching zombie night on and off | `wave`, `startBlock`, `holdAtGate`, `updateBlocks`, `resetRun`, `setZombieMode` |
 | `input.js` | held keys, one-shot actions, hotkeys | `keys`, `queued` |
 | `main.js` | `update()` (the fixed-step tick), `render()`, the loop, `window.game` | — |
 
@@ -113,7 +117,8 @@ one-line description and explicit imports. Files are listed from the bottom of t
   `const`/`let`/`function`/`class` is exported so other files can pick it up.
 - **Shared mutable state goes in `state`.** An imported binding can't be reassigned by the importer, so
   values that several files *change* live on the `state` object: `camMode`, `camYaw`, `camX`, `camZ`,
-  `playingRat`, `ratPlayer`, `block`, `cleared`, `crewLeft`, `gateOpen`, `bestBlocks`, `survived`,
+  `playingRat`, `ratPlayer`, `block`, `cleared`, `crewLeft`, `gateOpen`, `bestBlocks`, `zombies`, `zWave`,
+  `zBreak`, `bestWave`, `survived`,
   `knockouts`, `shake`, `caughtTimer`, `banner` (set it with `say(text, sub, frames)`), `fade` (the
   full-screen black-out, drawn by `updateHud`). Write `state.shake = 0.15`, never a separate `let shake`. One-shot key presses are
   the same idea: `queued.jump/punch/kick` in `input.js`. A `let` that only its own file changes stays
@@ -188,10 +193,10 @@ one-line description and explicit imports. Files are listed from the bottom of t
   constant only when used in more than one place (`FACADE_Z`, `KICK_WINDUP`, `RAT_COUNT`).
 
 ### Persistence and debugging
-- `localStorage` keys: `ragdollBestBlocks`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
+- `localStorage` keys: `ragdollBestBlocks`, `ragdollBestWave`, `ragdollSkin`, `ragdollCam`. Prefix new keys with `ragdoll`.
 - `window.game` exposes `man, gangsters, update, render, keys, boxesNear, jump(), punch(), kick(),
   roundKick(), music, rats, setSkin, setPlayingRat, sewer, state, wave, startBlock, spawnGangster, bottles,
-  giveWeapon('ak' | 'apples', ammo), pickups, paused`.
+  giveWeapon('ak' | 'apples', ammo), pickups, setZombieMode(on), horde, paused`.
   Add new systems here so they can be driven from the console.
 
 ## 5. World
@@ -416,6 +421,9 @@ say what he is. `mass` and `bulk` (mesh width, via `scale` on each part) come fr
 | Bruiser | 6 | 3.6 S | 26 / 22 | 2 / 2 | `armored`: punches hurt but don't stagger him; `mass` 1.8, `bulk` 1.4 |
 | Bottle Thrower | 2 | 4.4 S | 18 / 16 | bottle 1 / kick 2 | stands off 4.5–7.5 m and throws every 90–160 frames (a punch that releases a bottle in `resolvePunches`); kicks if you get within 1.6 m |
 | Big Tony (boss) | 14 (+4 per visit) | 4.2 S | 28 / 22 | 2 / 3, charge 3 | `armored`, `mass` 2.6, `bulk` 1.65; the charge (below); a stomp does 3 damage instead of a knockout (45-frame cooldown) |
+| Zombie | 2 | 2.4 S | 26 / — | grab 1 | zombie night only (§6c); `zombie`: weaves as it shambles, never jumps at you |
+| Sprinter | 1 | 5.6 S | 16 / — | grab 1 | zombie night, from wave 3 |
+| Brute | 7 | 2.1 S | 30 / — | grab 2 | zombie night, from wave 5; `armored`, `mass` 2, `bulk` 1.5; a stomp does 3 damage like Big Tony's |
 
 **Big Tony's charge** (`chargeBrain`): when his cooldown is up and you're 3–11 m away, he paws the
 ground for `CHARGE_WINDUP = 50` frames lining up on you (dust at his heels), then runs straight at 2.6×
@@ -466,6 +474,28 @@ tall obstacles, hop low ones, track the hero during the wind-up but commit once 
   the sewer also eases `state.fade`.
 - Nothing spawns and the gate is ignored while you're playing the rat.
 
+## 6c. Zombie night (`zombies.js`)
+
+- It runs on the street and in Brooklyn Heights (§17). `zombies.js` only uses `arena`: zombies spawn at
+  `arena.spawnAt` if the map has one (otherwise `hordeSpot`, both ends of the street), and each wave's
+  weapons go to `arena.dropNear(x, z)` if set (otherwise the street's middle strip). Each map saves its
+  own best wave (`horde.bestKey`).
+- On the street, **Z** or `#zombieBtn` calls `setZombieMode(on)` (`blocks.js`), which sets `state.zombies` and restarts
+  the run with `resetRun()` either way (not while busted). While it's on, `updateBlocks` hands over to
+  `updateHorde()`, the lights stay green and `holdAtGate` does nothing, so he can go where he likes.
+- Zombies are kinds in `GANG_TYPES` with `zombie: true` (looks in `GANGSTER_LOOKS`, faces from
+  `zombieFace`), so they go through the same brain, hits, knockouts, guns, apples and cars as gangsters.
+  `spawnGangster` passes the flag to the `Ragdoll` (`r.zombie`), whose `pose()` slouches the body and
+  holds both arms out in front; a swing raises both arms and claws them down.
+- `hordePlan(n)`: `4 + 2n` zombies (at most 40), up to `3 + 0.8n` (at most 10) at once; sprinters join
+  from wave 3, brutes from 5 (`ZOMBIE_DEBUT`, with a tip in the "Wave n" banner), more of both from 8.
+  They spawn every 25–70 frames, 22–28 m away at either end of the street (`hordeSpot`), and anyone
+  over 34 m away is brought back round like a straggling gangster, so they keep following him.
+- Each wave puts a fresh AK and basket of apples 5 m either side of him. Clearing it saves the best wave
+  (`ragdollBestWave`), gives back a heart and starts `state.zBreak = BREAK` (300 frames) before the next.
+  Nearby zombies moan now and then (`music.groan`). Getting caught says "The zombies got you!" and
+  restarts at wave 1, still on zombie night.
+
 ### The physics, briefly
 Verlet integration (velocity = position − previous position, 1% damping), 11 points, 11 sticks
 including a weak head-to-hip stick that stands in for a spine limit. Hits are impulses made by
@@ -482,7 +512,7 @@ mySkin: {
   name: 'Shown in the picker',
   top: '#hex', arms: '#hex' /* optional, defaults to top */, legs: '#hex', skin: '#hex',
   shoes: { color: '#hex', sole: '#hex', stripe: '#hex' }, // optional, each field optional
-  decorate(k) { /* add boxes to k.head, k.torso, k.farms; may set k.r.cup */ },
+  decorate(k) { /* add boxes to k.head, k.torso, k.farms; may set k.r.bag */ },
 },
 ```
 
@@ -496,9 +526,8 @@ mySkin: {
 - Order matters only for the picker: `SKIN_ORDER = Object.keys(SKINS)`. Adding an entry is enough to
   make it selectable (◀ ▶ buttons or **C**); the choice is saved.
 - Props that need to follow a joint without rotating with it are placed in `updateMeshes()`; set them
-  in `decorate` and handle them there. `r.cup` (the New Yorker's coffee, left hand) and `r.bag` (the
-  Boardwalk Drifter's duffel, hanging just outside the right hand, hidden while he holds the rifle or
-  a crate) are the two so far.
+  in `decorate` and handle them there. `r.bag` (the Boardwalk Drifter's duffel, hanging just outside
+  the right hand, hidden while he holds the rifle or a crate) is the only one so far.
 - Legs point down, so on thighs and shins `+x` is the *back*; put things on the front of the jeans at
   `-x` (`r.parts.thighL` etc. are already built when `decorate` runs).
 - Likenesses of real people stay respectful, cartoonish and "a bit like" — no caricatured features.
@@ -506,8 +535,8 @@ mySkin: {
 ## 8. Cameras and controls
 
 `setCamMode('behind' | 'side')` is the single switch. It saves the choice, sets fog (20–75 m behind,
-35–260 m side), field of view (62° / 50°), shows or hides every chunk's `front` row, and rewrites the
-help bar from `HELP_MOVE[mode]` + `HELP_REST`.
+35–260 m side), field of view (62° / 50°), shows or hides every chunk's `front` row, and relabels the
+camera button.
 
 | Key | Behind view | Side view |
 |---|---|---|
@@ -520,6 +549,7 @@ help bar from `HELP_MOVE[mode]` + `HELP_REST`.
 | Mouse | the first click grabs the mouse (pointer lock, Esc lets go); moving it left/right turns him and the camera (`mouse.turn`, 0.0035 rad per pixel). Clicks attack where he faces: left click punch (or throw what he's holding), right click kick, middle or Shift+left click round kick | the mouse stays free; the same clicks turn him to face the spot clicked, then to the nearest gangster in reach within 60° of it |
 | C / V / M | next skin / switch camera / sound on-off | same |
 | R | play as Pizza Rat (see below) / back to the man | same |
+| Z | zombie night on / off (restarts the run) | same |
 
 In behind view the camera sits 5 m behind and 2.8 m up, eases with `lerp(0.15)`, is clamped out of the
 houses, and `camX` runs 15 m ahead so chunks, litter and rats are ready in front of you.
@@ -613,8 +643,8 @@ Pattern for new ambient things: a pool or a fixed-size array that wraps around `
 - Top-left: block, "Heading for W 11th St", hearts (♥/♡ from `man.hp`), crew left (or "Green light"),
   best blocks / KOs / time. Top-right: skin picker, camera button, "Playing:" (man/rat) button, and the
   green "↑ Back to the street" button while the rat is underground. Centre: the banner (`state.banner`,
-  set with `say()`; fades over its last 20 frames). Bottom: Big Tony's health bar while he's standing,
-  and the help bar (rewritten for the man, the rat and the sewer). Between the 3D view and the HUD:
+  set with `say()`; fades over its last 20 frames). Bottom: Big Tony's health bar while he's standing.
+  Between the 3D view and the HUD:
   `#fade`, the black-out for the manhole transitions and the restart after getting busted.
 - Overlay buttons must call `e.preventDefault()` on `mousedown` so they never keep focus — otherwise
   the next Space press would click them.
@@ -687,9 +717,8 @@ const place = (g, x, z) => { const sx = x - g.x, sz = z - g.z; g.x = x; g.z = z;
 4. New behaviour through `control()` inputs and the existing attack/hit flow.
 5. Keep `update()` for state and `render()` for visuals.
 6. Expose new systems on `window.game`; prefix storage keys with `ragdoll`.
-7. Update the help text (`HELP_MOVE` / `HELP_REST`) for new controls.
-8. Reload, check the console, verify visually and with a scripted scenario.
-9. Update this guide.
+7. Reload, check the console, verify visually and with a scripted scenario.
+8. Update this guide.
 
 ## 16. Montague St (`montague.html`, `ragdoll/montague.js`)
 
@@ -744,6 +773,12 @@ the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from tu
   facade textures (one bay × one floor per tile, `tw` / `th` in metres). Plain-coloured parts share one
   vertex-coloured material. Trees, lamps, lanterns, parked cars and hydrants are `instanced()`.
   Materials with `userData.cast = false` (ground, far scenery) skip the shadow pass.
+- **`streetkit.js`** is what both 3D neighbourhoods (this one and Lower Manhattan, §18) are built from: the
+  facade tiles (`BROWN`, `BRICK`, `PAINT`, `FRAME`, `APT`, `LIME`, `GLASS`, `TAN`, `WAREHOUSE`, `MARBLE`,
+  the Gothic ones, `SHOPS`; `tile(facade({...}))` makes more), `PLAIN` / `FLAT` / `ROOF`, `AWNINGS`,
+  `GREENS`, `signMat(name)` for the green street signs, the sedan `carGeo`, `CAR_COLORS`, and
+  `buildProps(parent, { trees, lamps, lanterns, hydrants, parked })`, which makes the instanced props and
+  returns them with the car's geometry and material.
 - **`heights.js`** is the page. At the top it swaps the map into the game with `Object.assign(arena, HEIGHTS)`
   (and `arena.spawnAt` / `arena.pickupAt` from the run), so `combat.js`, `guns.js`, `apples.js`,
   `bottles.js` and `weapons.js` all work here unchanged. Its `tick()` follows `main.js`'s `update()`: a
@@ -755,7 +790,7 @@ the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from tu
   Promenade, the park and the bridge (hidden beyond 160 m), the cameras (the walk camera is pulled in front
   of walls and roofs, and shakes with `state.shake`), the street name of where he is, and `PLACES` for the
   number keys. `window.heights` exposes `hero`, `tick`, `goTo`, `setMode`, `yaw` (where he looks and aims),
-  `traffic`, `walkers`, `PLACES`, `mini`, `game`, `gangsters` and `state`.
+  `traffic`, `walkers`, `PLACES`, `mini`, `game`, `gangsters`, `state`, `cars` and `bikes`.
 - **`heightsrun.js`** is the run, the Heights' version of `blocks.js`: `TURFS` (the Promenade, Montague
   St, Columbus Park, Cadman Plaza Park, Pier 1, Pier 2, Pier 5, Atlantic Ave, Cranberry St, the War
   Memorial, then round again with bigger crews). `state.block` is the turf number, so `wavePlan` and the
@@ -766,6 +801,11 @@ the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from tu
   further off than `STRAY` = 48 m come back round near him. Clearing a turf gives back two hearts; busted
   goes back to the Promenade and turf 1. The best run is saved as `ragdollBestTurfs`. It also draws the HUD
   in `heights.html` (hearts, turf, crew or distance, ammo, score, banner, Big Tony's bar, fade).
+  **Zombie night** (§6c): **Z** (or opening `heights.html?zombies`) calls `setZombies(on)`, which starts
+  again right where he is: no turfs or beacon, the waves spawn 12–22 m round him wherever he goes
+  (`spawnAt`), anyone over `STRAY` comes back round, and each wave leaves a basket of apples near him
+  (`arena.dropNear`). Getting caught still sends him back to the Promenade, at wave 1. Best wave:
+  `ragdollBestHeightsWave`.
 - **`heightsmini.js`** draws the street map once, Google-coloured, and shows it turned to true north: the
   round minimap follows the hero; **Tab** (or a click on it) opens the full map, where a click on land
   sends him there (`goTo` finds a clear spot at street level, or on the walkway when it's on the bridge).
@@ -779,8 +819,66 @@ the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from tu
   of the bumper at speed are run over (`hitByCar`: three hit points and knocked flat, with a cool-down so it
   counts once). He rides along hidden and invulnerable at the car's spot, so the crew still comes for the
   car; street traffic stops behind his cars. The camera sits further back and swings round behind the car.
+- **`heightsbike.js`** has fixed gear bikes: eight locked to hoop racks (`BIKE_RACKS` in `heights.js`, each
+  through `spotNear`), each in its own frame and deep-V rim colours. **E** gets on the nearest within 2.2 m (or
+  the nearest car, whichever is closer) and off to whichever side has room, laying the bike down. He stays
+  visible: `pose()` writes his joints straight into `man.pts` every step (hip on the saddle, hands on the
+  bullhorns, feet on the pedals, knees and elbows by two-bone IK, all leaned with the bike's `roll`), and
+  `hero.step()` is skipped. The cranks are fixed to the back wheel (`GEAR` 48/17), so his legs turn whenever
+  it rolls. **W** pedals (0.24 m/frame, **Shift** stands up and sprints to 0.34), **S** backpedals: a skid at
+  speed (back wheel and cranks locked, skid marks, `music.skid()`), then held at a stop until released, and
+  from a stop it rides backwards. **A/D** steer and lean into the turn; stopped, he track stands. **Space**
+  bunny hops (~0.5 m, onto benches), **H** rings `music.bell()`. Collision is five probe points against
+  anything taller than `CLIMB`; hitting something at over 0.14 m/frame throws him over the bars (`knockOut`
+  carrying the bike's speed, no heart lost). Gangsters in front of the wheel at over 0.1 are run over
+  (`hitByCar`), and any hit that lands on him (`stun`) knocks him off.
 - Controls as on Montague St, except that he always runs at the game's pace and **Shift** sprints (2.2×,
   through `hero.speed`), since the map is a kilometre across; **F** punches (held, with apples: keeps throwing), **G**
-  kicks, **H** round kicks (honks in a car), **E** gets in or out of a car, or puts the apples down; **Tab** map, **1–7** places (Promenade, Brooklyn
+  kicks, **H** round kicks (honks in a car, rings the bell on a bike), **E** gets in or out of a car or on or off a bike, or puts the apples down; **Tab** map, **1–7** places (Promenade, Brooklyn
   Bridge, Borough Hall, Pier 1, Cadman Plaza Park, Montague St, Atlantic Ave; not while he's down), **Esc**
   closes the map. Red dots on the minimap are the gangsters.
+- **The 3D maps share the game modules.** `heightsrun.js`, `heightscars.js`, `heightsbike.js` and
+  `heightsmini.js` aren't tied to the Heights: the cars and bikes collide through `arena` (`boxesNear`,
+  `floorAt`, `inSolid`); `createRun` takes `turfList`, `home.name` (where busted sends him) and
+  `bestTurfsKey`; `createCars` takes the map's `traffic`, `pose(car)` (where a traffic car is),
+  `trafficMesh(car)` (what it looks like once taken), `movers`, `parked` and `props`; `createMinimap` takes
+  a `{ canvas, area, px, tilt }` picture (the Heights' own by default).
+- **Over the Brooklyn Bridge:** walking out to the Manhattan tower (past `xTower2 + 14`, up on the deck) loads
+  `manhattan.html?from=brooklyn`; arriving from there (`heights.html?from=manhattan`) puts him on the deck 40 m
+  from that tower, heading for Brooklyn.
+
+## 18. Lower Manhattan (`manhattan.html`, `ragdoll/manhattan*.js`)
+
+The other 3D neighbourhood, played the same way as Brooklyn Heights: Canal St down to the Battery, the
+Hudson across to the East River and the Brooklyn Bridge, about 1.6 × 2.2 km. The streets and parks are
+real (OpenStreetMap); the buildings are made up.
+
+- **`manhattanmap.js`** is data from OpenStreetMap (© OpenStreetMap contributors, ODbL): `STREETS`
+  (`[name, width, [x, z, …]]`, about 820 of them), `PARKS` (outlines), the 9/11 memorial's `POOLS`, and
+  `SPOTS`, where each landmark stands. The frame is turned 29° off true north so the grid runs along x
+  (grid-east, towards the East River) and z (grid-south, towards the Battery); Wall St & Broadway is about
+  the origin.
+- **`manhattanworld.js`** builds it on a 2 m grid. Every cell is road, sidewalk (within `WALK` = 3.5 m of a
+  curb), a building lot, a park, a plaza, a churchyard, a pool or the river (anything off the street that
+  isn't a block with streets on all four sides, or a park, and reaches the map's edge). The blocks are cut
+  into lots round jittered points 24 m apart, each with a style: walk-ups (shops, fire escapes, water tanks),
+  Tribeca's lofts, midrise apartments, prewar offices with setbacks and glass towers (thickest in the
+  Financial District, from Chambers St south). Each lot's runs of cells become boxes with a shopfront band,
+  awnings and doors (or a door and canopy) wherever they face a sidewalk, and a cornice. The streets'
+  asphalt and raised sidewalks are drawn along the streets' own lines (so the curbs are smooth at any angle),
+  with trees, lamps, hydrants, parked cars, double yellow lines, crosswalks and street signs at the corners.
+  Landmarks take over their cells: Trinity Church and St. Paul's Chapel in their churchyards, Federal Hall,
+  the Stock Exchange (flag and all), City Hall and its fountain, the Woolworth Building, One World Trade
+  Center, the memorial's pools and oaks, the Oculus, Castle Clinton, the Charging Bull. The Brooklyn Bridge
+  runs along its real line from Park Row, so its deck is worked out in `floorAt` rather than boxed. The
+  ground's height comes from the grid (`groundAt`: roads 0, everything else `CURB`), the rest from boxes in
+  a 16 m grid plus `movers`. It also exports the street network (`ways`, `along`), `spotNear`, `outdoors`,
+  `placeName`, `sidewalkPaths` and `drawMiniMap()`.
+- **`manhattan.js`** is the page, laid out like `heights.js`: the run over ten turfs (Bowling Green, Wall St,
+  City Hall Park, the 9/11 Memorial, Stone St, Zuccotti Park, the Battery, South Street Seaport, Trinity
+  Church, Tribeca), zombie night, the minimap, eight bikes, people on the sidewalks, and traffic: yellow
+  cabs, NYPD cars (light bars flashing), USPS vans and private cars on the street network, in the
+  right-hand lane, queueing and stopping for anyone in front; any of them (or a parked car) can be taken.
+  **1–8** places (Wall St & Broadway, the 9/11 Memorial, Bowling Green, City Hall, Stone St, the Brooklyn
+  Bridge, the Battery, South Street Seaport). Walking out to the bridge's Manhattan tower loads
+  `heights.html?from=manhattan`. Bests: `ragdollBestTurfsManhattan`, `ragdollBestManhattanWave`.

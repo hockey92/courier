@@ -1,6 +1,7 @@
 // Blocks: the run is a walk uptown one block at a time. Each block has a crew to knock out; until
 // they're all down the light at the crossing stays red and you can't cross. Every fifth block is
-// Big Tony's. Getting busted ends the run and starts it again from the first block.
+// Big Tony's. Getting busted ends the run and starts it again from the first block. On zombie night
+// (zombies.js) the horde's waves take over from the blocks.
 import { BLOCK, streetName } from './config.js';
 import { say, state } from './state.js';
 import { signalMats } from './world.js';
@@ -10,6 +11,8 @@ import { gangsters, man } from './actors.js';
 import { clearGangsters, spawnGangster } from './combat.js';
 import { setCamMode, setPlayingRat } from './ui.js';
 import { DEBUT, TIPS, wavePlan } from './waves.js';
+import { stockPickups } from './weapons.js';
+import { startHorde, updateHorde } from './zombies.js';
 
 export const gateX = n => n * BLOCK;
 
@@ -34,7 +37,7 @@ export function startBlock(n) {
 
 // the man waits at the curb while the light is red; called straight after he moves
 export function holdAtGate() {
-  if (state.gateOpen || state.playingRat) return;
+  if (state.gateOpen || state.playingRat || state.zombies) return;
   const x = gateX(state.block) - 0.35;
   if (man.x <= x) return;
   man.x = x;
@@ -54,6 +57,7 @@ export function updateBlocks() {
     return;
   }
   if (state.playingRat) return;
+  if (state.zombies) { updateHorde(); return; }
   let standing = 0;
   for (const g of gangsters) if (!g.leaveT) standing++;
   state.crewLeft = wave.queue.length + standing;
@@ -96,5 +100,20 @@ export function resetRun() {
   state.camYaw = 0; state.camX = 0; state.camZ = 1;
   state.cleared = 0; state.knockouts = 0; state.survived = 0;
   setCamMode(state.camMode);
-  startBlock(1);
+  if (state.zombies) {
+    // no gate on zombie night: the lights stay green and he can go where he likes
+    setSignal(true);
+    startHorde(1);
+  } else {
+    startBlock(1);
+    stockPickups();
+  }
+}
+
+// zombie night on or off (Z or the button): either way the run starts again from the beginning
+export function setZombieMode(on) {
+  if (state.caughtTimer > 0 || on === state.zombies) return;
+  state.zombies = on;
+  if (!on) state.zBreak = 0;
+  resetRun();
 }

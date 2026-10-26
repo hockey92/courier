@@ -57,17 +57,20 @@ export function putDown(ahead = 0) {
   man.weapon = null; man.aiming = false;
 }
 
+// a fresh one of each for the block he's on
+export function stockPickups() {
+  pickupBlock = state.block;
+  for (const p of Object.values(pickups)) {
+    if (arena.weapons && !arena.weapons.includes(p.type)) { p.live = false; continue; }
+    const at = arena.pickupAt && arena.pickupAt(p.type, state.block);
+    if (at) Object.assign(p, { live: true, ...at, ammo: WEAPONS[p.type].ammo, wait: false });
+    else placePickup(p, (state.block - 1) * BLOCK + WEAPONS[p.type].x, 0.6);
+  }
+}
+
 // firing: the trigger's held; aimYaw: the way he's aiming; aimLock: keep facing it even when not firing
 export function updateWeapons(firing, aimYaw, aimLock) {
-  if (state.block !== pickupBlock) {
-    pickupBlock = state.block;
-    for (const p of Object.values(pickups)) {
-      if (arena.weapons && !arena.weapons.includes(p.type)) { p.live = false; continue; }
-      const at = arena.pickupAt && arena.pickupAt(p.type, state.block);
-      if (at) Object.assign(p, { live: true, ...at, ammo: WEAPONS[p.type].ammo, wait: false });
-      else placePickup(p, (state.block - 1) * BLOCK + WEAPONS[p.type].x, 0.6);
-    }
-  }
+  if (state.block !== pickupBlock) stockPickups();
   for (const p of Object.values(pickups)) {
     const near = Math.hypot(man.x - p.x, man.z - p.z);
     if (p.wait && near > 1.2) p.wait = false;

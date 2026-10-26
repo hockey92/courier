@@ -1,9 +1,9 @@
 // The Ragdoll class used by the hero and the gangsters: controller, attacks, animated pose,
 // Verlet ragdoll physics and meshes.
 import * as THREE from 'three';
-import { BODY_R, FARM, GRAVITY, HEAD, HIP_W, JOINT_GAP, JUMP_V, KICK_WINDUP, NECK, RUN_SPEED, S, SHIN, SH_W, THIGH, TORSO, UARM, lerp, rot } from './config.js';
+import { BODY_R, FARM, GRAVITY, HEAD, HIP_W, JUMP_V, KICK_WINDUP, NECK, RUN_SPEED, S, SHIN, SH_W, THIGH, TORSO, UARM, lerp, rot } from './config.js';
 import { scene } from './scene.js';
-import { boxGeo, mat, orient } from './materials.js';
+import { boxGeo, cylGeo, mat, orient } from './materials.js';
 import { arena } from './arena.js';
 import { dust } from './effects.js';
 import { GANGSTER_LOOK, SKINS } from './looks.js';
@@ -30,7 +30,7 @@ const THROW_WIND = 10;
 // extra wind-up frames to cock an apple back behind the head
 const APPLE_WIND = 5;
 const UPPER = new Set(['neck', 'head', ...ARMS]);
-
+const UP = new THREE.Vector3(0, 1, 0);
 export class Ragdoll {
   constructor(x, z, opts) {
     Object.assign(this, {
@@ -57,6 +57,8 @@ export class Ragdoll {
       // kickStyle: 'front' or 'round'. A round kick swings the leg out to the side (sweep), tilts the
       // upper body away (tilt) and spins the whole body a full turn (spin, added to the heading)
       kickStyle: 'front', sweep: 0, tilt: 0, spin: 0, round: null,
+      // zombie: slouches with both arms held out in front, and a swing is a two-handed lunge
+      zombie: false,
       // where it lives (arena.js): the game's street, or whatever map has swapped itself in; Montague St
       // passes its own
       world: arena,
@@ -323,7 +325,7 @@ export class Ragdoll {
     const [tWind, tExt] = this.throwPose();
     const lean = (airborne ? lerp(0.1, 0.7, tuck) : 0.03 + (0.28 + 0.05 * Math.cos(2 * p)) * run)
       + 0.2 * ext - 0.1 * wind - 0.4 * Math.min(1, this.stun / 15) - (roundKick ? 0.1 : 0.45) * kExt - 0.15 * kWind
-      - 0.2 * tWind + 0.3 * tExt;
+      - 0.2 * tWind + 0.3 * tExt + (this.zombie ? 0.22 : 0);
     let d = rot(Math.sin(lean) * TORSO, -Math.cos(lean) * TORSO, flip);
     t.neck = { x: hip.x + d.x, y: hip.y + d.y };
     // head stays upright while running, tucks chin to chest in the flip
@@ -398,7 +400,13 @@ export class Ragdoll {
         a = lerp(a, off ? 1.3 : 0.05, aim);
         bend = lerp(bend, off ? 0.1 : 2.1, aim);
       }
-      if (e === 'elbow' + this.punchSide && (wind || ext) && this.punchStyle === 'back') {
+      if (this.zombie) {
+        // arms out in front, drifting a little; a swing raises both and claws them down onto him
+        const out = 1 - tuck, drift = Math.sin(this.idle * 2 + off) * 0.1;
+        a = lerp(a, Math.PI / 2 - 0.15 + drift, out); bend = lerp(bend, 0.15, out);
+        a = lerp(lerp(a, 2.4, wind), Math.PI / 2 - 0.2, ext);
+        bend = lerp(lerp(bend, 0.3, wind), 0.05, ext);
+      } else if (e === 'elbow' + this.punchSide && (wind || ext) && this.punchStyle === 'back') {
         // backfist: elbow up and the fist cocked by the chin (the shoulder twist carries it across to the
         // far side) while he spins, then the arm snaps straight as the shoulders unwind
         a = lerp(lerp(a, 1.3, wind), Math.PI / 2 + 0.1, ext);
@@ -523,23 +531,36 @@ export class Ragdoll {
 
   buildMeshes() {
     if (this.group) scene.remove(this.group);
-    this.cup = this.bag = this.shoes = null;
+    this.bag = this.shoes = null;
     const g = this.group = new THREE.Group();
     const look = this.look || (this.style === 'gangster' ? GANGSTER_LOOK : SKINS[this.skin] || SKINS.newyorker);
     const top = mat(look.top), arms = mat(look.arms || look.top), legs = mat(look.legs);
     const part = (w, len, d, m) => {
-      const mesh = new THREE.Mesh(boxGeo(w, Math.max(0.02, len - JOINT_GAP), d), m);
+      const mesh = new THREE.Mesh(boxGeo(w, len, d), m);
       mesh.scale.set(this.bulk, 1, this.bulk);
       mesh.castShadow = true; g.add(mesh);
       return mesh;
     };
     this.parts = {
       torso: part(0.24, TORSO, 0.32, top),
-      uarmL: part(0.13, UARM, 0.13, arms), farmL: part(0.12, FARM, 0.12, arms),
-      uarmR: part(0.13, UARM, 0.13, arms), farmR: part(0.12, FARM, 0.12, arms),
-      thighL: part(0.16, THIGH, 0.16, legs), shinL: part(0.15, SHIN, 0.15, legs),
-      thighR: part(0.16, THIGH, 0.16, legs), shinR: part(0.15, SHIN, 0.15, legs),
+      // each limb is one width all the way down, so a straight elbow or knee is flush
+      uarmL: part(0.125, UARM, 0.125, arms), farmL: part(0.125, FARM, 0.125, arms),
+      uarmR: part(0.125, UARM, 0.125, arms), farmR: part(0.125, FARM, 0.125, arms),
+      thighL: part(0.155, THIGH, 0.155, legs), shinL: part(0.155, SHIN, 0.155, legs),
+      thighR: part(0.155, THIGH, 0.155, legs), shinR: part(0.155, SHIN, 0.155, legs),
     };
+    // a rounded elbow and knee: a short cylinder across the joint, a little thinner than the limb so it's hidden
+    // when straight, and filling the outside of the bend when it isn't
+    const pin = (r, len, m) => {
+      const mesh = new THREE.Mesh(cylGeo(r, r, len), m);
+      mesh.scale.set(this.bulk, 1, this.bulk);
+      mesh.castShadow = true; g.add(mesh);
+      return mesh;
+    };
+    Object.assign(this.parts, {
+      elbowL: pin(0.06, 0.12, arms), elbowR: pin(0.06, 0.12, arms),
+      kneeL: pin(0.075, 0.15, legs), kneeR: pin(0.075, 0.15, legs),
+    });
     const skin = mat(look.skin);
     const head = this.parts.head = new THREE.Mesh(boxGeo(HEAD, HEAD, HEAD), skin);
     head.scale.setScalar(Math.sqrt(this.bulk));
@@ -561,7 +582,7 @@ export class Ragdoll {
     look.decorate({
       r: this, g, head, deco, skin,
       torso: this.parts.torso, farms: [this.parts.farmL, this.parts.farmR],
-      h: HEAD / 2, tl: (TORSO - JOINT_GAP) / 2, fl: (FARM - JOINT_GAP) / 2,
+      h: HEAD / 2, tl: TORSO / 2, fl: FARM / 2,
     });
     scene.add(g);
   }
@@ -579,11 +600,15 @@ export class Ragdoll {
     const legR = this.sweep && this.kickSide === 'R' ? turned(this.legSide, this.sweep) : sd;
     const o = (mesh, a, b, latA = 0, s = sd) =>
       orient(mesh, a.x + s.x * latA, a.y + s.y * latA, a.z + s.z * latA, b.x, b.y, b.z, s);
+    // along the axis the joint bends about
+    const pin = (mesh, j, s) => orient(mesh, j.x - s.x, j.y - s.y, j.z - s.z, j.x + s.x, j.y + s.y, j.z + s.z, UP);
     o(this.parts.torso, P.hip, P.neck, 0, sh);
     o(this.parts.uarmL, P.neck, P.elbowL, SH_W, sh); o(this.parts.farmL, P.elbowL, P.handL);
     o(this.parts.uarmR, P.neck, P.elbowR, -SH_W, sh); o(this.parts.farmR, P.elbowR, P.handR);
     o(this.parts.thighL, P.hip, P.kneeL, HIP_W, legL); o(this.parts.shinL, P.kneeL, P.footL);
     o(this.parts.thighR, P.hip, P.kneeR, -HIP_W, legR); o(this.parts.shinR, P.kneeR, P.footR);
+    pin(this.parts.elbowL, P.elbowL, sh); pin(this.parts.elbowR, P.elbowR, sh);
+    pin(this.parts.kneeL, P.kneeL, legL); pin(this.parts.kneeR, P.kneeR, legR);
     // head: centred on the head point, pointing away from the neck
     const hd = P.head, nk = P.neck;
     orient(this.parts.head, 2 * nk.x - hd.x, 2 * nk.y - hd.y, 2 * nk.z - hd.z, hd.x, hd.y, hd.z, sd);
@@ -593,11 +618,6 @@ export class Ragdoll {
         this.shoes[i].position.set(ft.x + f.x * 0.04, ft.y, ft.z + f.z * 0.04);
         this.shoes[i].rotation.set(0, -this.heading - this.spin, 0);
       });
-    }
-    if (this.cup) {
-      const hd = P.handL;
-      this.cup.position.set(hd.x + f.x * 0.03, hd.y, hd.z + f.z * 0.03);
-      this.cup.rotation.set(0, 0, this.alive ? 0 : Math.PI / 2);
     }
     if (this.bag) {
       // hangs just outside the right hand, clear of the leg; set aside while his hands are full

@@ -6,8 +6,10 @@ import { boxesNear, floorAt } from './world.js';
 
 export const arena = {
   boxesNear, floorAt, zMin: Z_MIN, zMax: Z_MAX,
+  inSolid: null,       // (x, y, z) => is that point inside something solid; the 3D maps' cars and bikes need it
   step: 0.03,          // the tallest ledge a ragdoll walks straight up onto
   spawnAt: null,       // () => { x, y, z } for the next gangster; null: just out of view down the street
   pickupAt: null,      // (type, block) => { x, y, z } for that block's weapon; null: a few steps into the block
   weapons: null,       // the kinds of weapon (weapons.js) lying around to pick up; null: all of them
+  dropNear: null,      // (x, z) => { x, y, z }, a clear spot near there for a weapon (zombie night); null: the street
 };

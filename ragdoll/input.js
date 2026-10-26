@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { state } from './state.js';
 import { camera, renderer } from './scene.js';
 import { music } from './music.js';
-import { changeSkin, setPlayingRat, toggleCam } from './ui.js';
+import { changeSkin, setPlayingRat, toggleCam, zombieBtn } from './ui.js';
+import { setZombieMode } from './blocks.js';
 
 // ---------- Input ----------
 export const keys = {};
@@ -19,6 +20,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC' && !keys[e.code]) changeSkin(1);
   if (e.code === 'KeyV' && !keys[e.code]) toggleCam();
   if (e.code === 'KeyR' && !keys[e.code]) setPlayingRat(!state.playingRat);
+  if (e.code === 'KeyZ' && !keys[e.code]) setZombieMode(!state.zombies);
   if (e.code === 'Space' && !keys[e.code]) queued.jump = true;
   if (e.code === 'KeyF' && !keys[e.code]) queued.punch = true;
   if (e.code === 'KeyG' && !keys[e.code]) queued.kick = true;
@@ -28,6 +30,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
+zombieBtn.addEventListener('click', () => setZombieMode(!state.zombies));
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouse.fire = false; });
 
 // ---------- Mouse ----------

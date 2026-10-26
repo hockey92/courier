@@ -1,4 +1,4 @@
-// On-screen UI: skin picker, camera switch, man/rat switch, help bar and the HUD.
+// On-screen UI: skin picker, camera switch, man/rat switch and the HUD.
 import { Z_MAX, streetName } from './config.js';
 import { state } from './state.js';
 import { camera, scene } from './scene.js';
@@ -25,12 +25,7 @@ export function setSkin(name) {
 skinName.textContent = SKINS[man.skin].name;
 
 // camera switch: the button in the corner or the V key
-export const camBtn = document.getElementById('camBtn'), helpBar = document.getElementById('help');
-export const HELP_MOVE = {
-  behind: '← → turn · ↑ run · ↓ run back · click the game to steer with the mouse (Esc lets go) · weapons aim where the camera looks',
-  side: '← → run · ↑ ↓ move up and down the street · weapons aim at the mouse cursor (or where he faces if you leave the mouse alone)',
-};
-export const HELP_REST = 'Space jump (again in the air for a flip) · F punch · G kick (hits twice as hard) · H spinning round kick (also catches anyone to the side) · E pick up a crate or trash can, E again (or F) to throw it · walk over the AK-47 or the apple basket to pick it up (it swaps for what you hold): F or left click fires or throws where you aim (hold for full auto), E puts it down · mouse: left click punch / throw, right click kick, middle or Shift+click round kick (aimed at the cursor, or where he faces while steering with the mouse) · stomp on heads · knock out the whole crew and the light turns green so you can cross to the next block · C change skin · V camera · M sound on/off';
+export const camBtn = document.getElementById('camBtn');
 export function setCamMode(mode) {
   state.camMode = mode;
   // mouse steering is only for the behind view
@@ -47,7 +42,6 @@ export function setCamMode(mode) {
   camera.updateProjectionMatrix();
   for (const c of liveChunks.values()) c.front.visible = mode === 'behind';
   camBtn.textContent = `Camera: ${mode === 'behind' ? 'Behind' : 'Side'} (V)`;
-  helpBar.textContent = `${HELP_MOVE[mode]} · ${HELP_REST} · R play as a rat`;
 }
 export function toggleCam() {
   if (!state.playingRat) setCamMode(state.camMode === 'behind' ? 'side' : 'behind');
@@ -57,8 +51,6 @@ camBtn.addEventListener('click', toggleCam);
 
 // play as the man or as Pizza Rat: the button in the corner or the R key
 export const playBtn = document.getElementById('playBtn');
-export const RAT_HELP = "← → turn · ↑ scurry · ↓ back up · Space hop (up onto crates, bins and taxis) · F bite a gangster's ankle · scurry into an open manhole to see who lives down there · R back to the man · M sound on/off";
-export const SEWER_HELP = '← → turn · ↑ scurry · ↓ back up · Space hop · follow the pizza signs to the lair · Space at the ladder under the light (or the Back to the street button) to climb out · F bite · R back to the man · M sound on/off';
 export function setPlayingRat(on) {
   state.playingRat = on;
   state.ratPlayer = on ? rats[0] : null;
@@ -78,7 +70,6 @@ export function setPlayingRat(on) {
     camera.fov = 72; camera.updateProjectionMatrix();
     for (const c of liveChunks.values()) c.front.visible = true;
     camBtn.textContent = "Camera: Rat's eye";
-    helpBar.textContent = RAT_HELP;
   } else {
     const r = rats[0];
     leaveSewer(r);
@@ -89,6 +80,9 @@ export function setPlayingRat(on) {
 }
 playBtn.addEventListener('mousedown', e => e.preventDefault());
 playBtn.addEventListener('click', () => setPlayingRat(!state.playingRat));
+// zombie night on or off (its click goes to setZombieMode, wired up in input.js)
+export const zombieBtn = document.getElementById('zombieBtn');
+zombieBtn.addEventListener('mousedown', e => e.preventDefault());
 // only shown while the rat is down the manhole: straight back up, still playing the rat
 export const streetBtn = document.getElementById('streetBtn');
 streetBtn.addEventListener('mousedown', e => e.preventDefault());
@@ -111,27 +105,32 @@ export const bannerTitle = document.getElementById('bannerTitle'), bannerSub = d
 export const bossEl = document.getElementById('boss'), bossFill = document.getElementById('bossFill');
 export const fadeEl = document.getElementById('fade');
 export let shownBanner = null;
-export let sewerHelpShown = false, streetBtnShown = false;
+export let streetBtnShown = false;
 
 export function updateHud() {
   fadeEl.style.opacity = state.fade;
   const r = state.ratPlayer;
-  const inSewer = state.playingRat && r.inSewer;
-  if (inSewer !== sewerHelpShown) {
-    sewerHelpShown = inSewer;
-    if (state.playingRat) helpBar.textContent = inSewer ? SEWER_HELP : RAT_HELP;
-  }
   const down = !!(state.playingRat && (r.inSewer || r.hole));
   if (down !== streetBtnShown) { streetBtnShown = down; streetBtn.style.display = down ? 'block' : 'none'; }
-  hudBlock.textContent = `Block ${state.block}`;
-  hudStreet.textContent = `Heading for ${streetName(state.block)}`;
-  hudCrew.textContent = state.gateOpen ? 'Green light: cross the street →' : `Crew left: ${state.crewLeft}`;
-  hudCrew.classList.toggle('go', state.gateOpen);
+  zombieBtn.textContent = `Zombie night: ${state.zombies ? 'On' : 'Off'} (Z)`;
+  zombieBtn.classList.toggle('on', state.zombies);
+  if (state.zombies) {
+    hudBlock.textContent = `Zombie wave ${state.zWave}`;
+    hudStreet.textContent = 'They keep coming…';
+    hudCrew.textContent = state.zBreak > 0 ? `Next wave in ${Math.ceil(state.zBreak / 60)}…` : `Zombies left: ${state.crewLeft}`;
+    hudCrew.classList.toggle('go', state.zBreak > 0);
+  } else {
+    hudBlock.textContent = `Block ${state.block}`;
+    hudStreet.textContent = `Heading for ${streetName(state.block)}`;
+    hudCrew.textContent = state.gateOpen ? 'Green light: cross the street →' : `Crew left: ${state.crewLeft}`;
+    hudCrew.classList.toggle('go', state.gateOpen);
+  }
   const hearts = man.alive ? Math.max(0, man.hp) : 0;
   hudHearts.textContent = '♥'.repeat(hearts) + '♡'.repeat(man.maxHp - hearts);
   const w = man.weapon;
   hudAmmo.textContent = w ? `${WEAPONS[w.type].name} · ${w.ammo}/${WEAPONS[w.type].ammo}` : '';
-  hudSub.textContent = `Best: ${state.bestBlocks} block${state.bestBlocks === 1 ? '' : 's'} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
+  const best = state.zombies ? `wave ${state.bestWave}` : `${state.bestBlocks} block${state.bestBlocks === 1 ? '' : 's'}`;
+  hudSub.textContent = `Best: ${best} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
   const b = state.banner;
   if (b !== shownBanner) {
     shownBanner = b;

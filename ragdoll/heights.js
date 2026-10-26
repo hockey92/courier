@@ -17,10 +17,12 @@ import { checkHits, gangsterBrain, renderGangs, resolvePunches, updateGangs } fr
 import { renderBottles } from './bottles.js';
 import { putDown, renderWeapons, updateWeapons } from './weapons.js';
 import { BQE, BRIDGE, CELLS, CURB, EW, NS, PIERS, PROMENADE, TOP, WALK, WF, bridgeY, descentAt, descentY } from './heightsmap.js';
-import { HEIGHTS, buildHeights, floorAt, inSolid, movers, onLand, props } from './heightsworld.js';
+import { HEIGHTS, buildHeights, floorAt, inSolid, movers, onLand, parked, props } from './heightsworld.js';
 import { createMinimap } from './heightsmini.js';
 import { createRun, updateHud } from './heightsrun.js';
 import { createCars } from './heightscars.js';
+import { createBikes } from './heightsbike.js';
+import { horde } from './zombies.js';
 
 // the fight happens here now, not on the game's street
 Object.assign(arena, HEIGHTS);
@@ -28,6 +30,8 @@ Object.assign(arena, HEIGHTS);
 for (const c of gameTraffic) scene.remove(c.g);
 music.toggle();
 state.bestBlocks = +localStorage.getItem('ragdollBestTurfs') || 0;
+horde.bestKey = 'ragdollBestHeightsWave';
+state.bestWave = +localStorage.getItem(horde.bestKey) || 0;
 
 // ---------- A sunny late afternoon in October: the sun low over the harbour, west-southwest ----------
 {
@@ -96,7 +100,18 @@ function goTo(x, z, heading) {
   walkYaw = hero.heading; snapCam = true;
   return true;
 }
-goTo(PLACES[0].x, PLACES[0].z, PLACES[0].heading);
+// back from Lower Manhattan over the bridge (manhattan.html sends him here), or the Promenade
+const fromManhattan = new URLSearchParams(location.search).get('from') === 'manhattan';
+if (fromManhattan) goTo(BRIDGE.xTower2 + 40, BRIDGE.z, 0);
+else goTo(PLACES[0].x, PLACES[0].z, PLACES[0].heading);
+// walking up to the Manhattan tower takes him across to Lower Manhattan
+let leaving = false;
+function toManhattan() {
+  if (leaving || hero.y < TOP + 10 || Math.abs(hero.z - BRIDGE.z) > 14 || hero.x > BRIDGE.xTower2 + 14) return;
+  leaving = true;
+  whereEl.textContent = 'Over the river to Manhattan…';
+  location.href = 'manhattan.html?from=brooklyn';
+}
 
 const whoEl = document.getElementById('who'), whereEl = document.getElementById('where'), helpEl = document.getElementById('help');
 const promptEl = document.getElementById('prompt');
@@ -135,11 +150,18 @@ function outdoors(x, z) {
 }
 
 // ---------- The run: turf to turf, the game's gangsters and weapons ----------
-const game = createRun({ spotNear, place, outdoors, home: PLACES[0] });
+const game = createRun({ spotNear, place, outdoors, home: { ...PLACES[0], name: 'the Promenade' } });
 arena.spawnAt = game.spawnAt;
 arena.pickupAt = game.pickupAt;
 arena.weapons = ['apples'];
+// zombie night's apples: a clear spot near there at about his level, or at his feet
+arena.dropNear = (x, z) => {
+  const s = spotNear(x, z);
+  return s && Math.abs(s[1] - hero.y) < 2.5 ? { x: s[0], y: s[1], z: s[2] } : { x: hero.x, y: hero.y, z: hero.z };
+};
 game.start(1);
+// heights.html?zombies starts on zombie night
+if (new URLSearchParams(location.search).has('zombies')) game.setZombies(true);
 
 // ---------- Traffic ----------
 // lanes: along x or z at a fixed coordinate, one way; y is the road's height (a function of the distance
@@ -178,7 +200,27 @@ traffic.forEach((c, i) => carMesh.setColorAt(i, new THREE.Color(c.color)));
 world.add(carMesh);
 const carObj = new THREE.Object3D();
 const yOf = (L, s) => typeof L.y === 'function' ? L.y(s) : L.y;
-const cars = createCars({ traffic, yOf, place });
+const cars = createCars({
+  traffic, place, movers, parked, props,
+  pose: c => {
+    const L = c.L;
+    return {
+      x: L.axis === 'x' ? c.s : L.at, y: yOf(L, c.s), z: L.axis === 'x' ? L.at : c.s, speed: c.v,
+      heading: L.axis === 'x' ? (L.dir > 0 ? 0 : Math.PI) : (L.dir > 0 ? Math.PI / 2 : -Math.PI / 2),
+    };
+  },
+});
+// fixed gear bikes locked up round the neighbourhood: [x, z, heading], on a sidewalk or path near each
+const BIKE_RACKS = [
+  [-11, -8, Math.PI / 2], [-5.5, 30, -Math.PI / 2],   // the Promenade
+  [300, -7.5, Math.PI], [200, 115.6, 0],              // Montague St, Remsen St
+  [640, 160, 0], [655, -415, -Math.PI / 2],           // Columbus Park, Cadman Plaza Park
+  [-146, -645, Math.PI], [262, 497, 0],               // Pier 1, Atlantic Ave & Hicks
+];
+const bikes = createBikes({
+  parent: world, place,
+  racks: BIKE_RACKS.map(([x, z, h]) => { const s = spotNear(x, z); return s && [s[0], s[1], s[2], h]; }).filter(Boolean),
+});
 function driveTraffic() {
   for (const c of traffic) {
     if (c.taken) continue;   // he's driving it now (heightscars.js)
@@ -191,7 +233,7 @@ function driveTraffic() {
     }
     // anyone (him or a gangster) standing in the lane ahead, or a car he's driven
     if (L.walk) {
-      for (const p of [hero, ...gangsters, ...cars.mine]) {
+      for (const p of [hero, ...gangsters, ...cars.mine, ...bikes.bikes]) {
         const along = L.axis === 'x' ? p.x : p.z, across = L.axis === 'x' ? p.z : p.x;
         const d = (along - c.s) * L.dir - 2.6;
         if (Math.abs(across - L.at) < 1.7 && Math.abs(p.y - yOf(L, c.s)) < 2 && d > -1.5) gap = Math.min(gap, d);
@@ -288,7 +330,7 @@ function renderWalkers(dt, t) {
 // ---------- Cameras: over the hero's shoulder ('walk'), or free ('look') ----------
 const view = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, fov: 60 };
 const HELP = {
-  walk: '↑ ↓ / W S run · ← → / A D or drag to turn · Shift sprint · wheel zoom · Space jump (again for a flip)<br>F punch (or throw apples, hold it) · G kick · H round kick · E get in / out of a car (or put the apples down) · Tab map (click to go there) · 1–7 places · C skin · M music · V free camera',
+  walk: '↑ ↓ / W S run · ← → / A D or drag to turn · Shift sprint · wheel zoom · Space jump (again for a flip)<br>F punch (or throw apples, hold it) · G kick · H round kick · E get in / out of a car, on / off a bike (or put the apples down) · Tab map (click to go there) · 1–7 places · C skin · M music · V free camera · Z zombie night<br>Walk the Brooklyn Bridge out to its Manhattan tower to cross to Lower Manhattan',
   look: 'Drag to look · wheel to zoom · W A S D / arrows to fly · Shift faster · Q E down / up<br>Tab map · 1–7 places · V back to walking',
 };
 let mode = 'walk', walkDist = 6;
@@ -309,7 +351,7 @@ const keys = {};
 const mini = createMinimap(document.getElementById('mini'), document.getElementById('bigmap'), (x, z) => {
   if ((!onLand(x, z) && !onBridge(x, z)) || !hero.alive) return false;
   if (mode === 'look') setMode('walk');
-  if (cars.driving) cars.use();
+  if (cars.driving || bikes.riding) (cars.driving ? cars : bikes).use();
   return goTo(x, z);
 });
 addEventListener('keydown', e => {
@@ -322,19 +364,20 @@ addEventListener('keydown', e => {
     if (e.code === 'Space') queued.jump = true;
     if (e.code === 'KeyF') queued.punch = true;
     if (e.code === 'KeyG') queued.kick = true;
-    if (e.code === 'KeyH') { if (cars.driving) cars.honk(); else queued.kick = 'round'; }
+    if (e.code === 'KeyH') { if (cars.driving) cars.honk(); else if (bikes.riding) bikes.bell(); else queued.kick = 'round'; }
     if (e.code === 'KeyE') queued.grab = true;
   }
   const n = e.code.startsWith('Digit') ? +e.code.slice(5) : 0;
   if (n >= 1 && n <= PLACES.length && hero.alive) {
     const p = PLACES[n - 1];
     if (mode === 'look') setMode('walk');
-    if (cars.driving) cars.use();
+    if (cars.driving || bikes.riding) (cars.driving ? cars : bikes).use();
     goTo(p.x, p.z, p.heading);
   }
   if (e.code === 'KeyC') nextSkin();
   if (e.code === 'KeyM') { music.start(); music.toggle(); }
   if (e.code === 'KeyV') setMode(mode === 'walk' ? 'look' : 'walk');
+  if (e.code === 'KeyZ') game.setZombies(!state.zombies);
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 let drag = null;
@@ -361,13 +404,25 @@ function tick() {
   const fwd = steering ? (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) : 0;
   const turn = steering ? (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0) : 0;
   const shift = keys.ShiftLeft || keys.ShiftRight;
-  // E: into the nearest car (setting the apples down first), out of this one, or the apples down
+  // E: into the nearest car or onto the nearest bike, whichever's closer (setting the apples down first), out of
+  // or off this one, or the apples down
   if (queued.grab) {
-    if (!cars.driving && hero.weapon && cars.nearest()) putDown();
-    if (!cars.use() && hero.weapon) putDown(0.6);
+    let ride = cars.driving ? cars : bikes.riding ? bikes : null;
+    if (!ride) {
+      const car = cars.nearest(), bike = bikes.nearest();
+      ride = bike && (!car || bike.d < Math.hypot(car.x - hero.x, car.z - hero.z)) ? bikes : car ? cars : null;
+      if (ride && hero.weapon && hero.alive) putDown();
+    }
+    if (!ride?.use() && hero.weapon) putDown(0.6);
   }
   queued.grab = false;
-  if (cars.driving) {
+  if (bikes.riding) {
+    bikes.ride(fwd, turn, shift, queued.jump);
+    const d = hero.heading - walkYaw;
+    walkYaw += Math.atan2(Math.sin(d), Math.cos(d)) * 0.07;
+    queued.jump = queued.punch = queued.kick = false;
+    updateWeapons(false, walkYaw, false);
+  } else if (cars.driving) {
     cars.drive(fwd, turn, shift);
     // the camera swings round behind the car
     const d = cars.driving.heading - walkYaw;
@@ -381,7 +436,9 @@ function tick() {
   for (const g of gangsters) g.control(...gangsterBrain(g));
   resolvePunches();
   checkHits();
-  if (!cars.driving) hero.step();
+  if (!cars.driving && !bikes.riding) hero.step();
+  toManhattan();
+  bikes.update();
   for (const g of gangsters) g.step();
   if (hero.alive) state.survived += 1 / 60;
   updateGangs();
@@ -419,7 +476,7 @@ function onFoot(ix, iz, shift) {
 function followHero() {
   // behind him, or further back behind the car he's driving (looking from over its roof, so the wall check
   // doesn't catch the car itself)
-  const car = cars.driving, dist = car ? walkDist + 4 : walkDist;
+  const car = cars.driving, dist = car ? walkDist + 4 : bikes.riding ? walkDist + 1.5 : walkDist;
   const hip = car ? { x: car.x, y: car.y + 1.2, z: car.z } : hero.pts.hip, cx = Math.cos(walkYaw), cz = Math.sin(walkYaw);
   eye.set(hip.x, hip.y + 0.5, hip.z);
   camTarget.set(hip.x - cx * dist, hip.y + 0.6 + dist * 0.32, hip.z - cz * dist);
@@ -460,6 +517,7 @@ function frame() {
   keyLight.position.set(sx + SUN.x * 250, sy + SUN.y * 250, sz + SUN.z * 250);
   state.camX = hero.x; state.camZ = hero.z;   // the sound effects play near here
   renderTraffic();
+  bikes.render();
   renderWalkers(dt, t);
   hero.updateMeshes();
   if (cars.driving) hero.group.visible = false;   // he's inside
@@ -470,8 +528,10 @@ function frame() {
   game.render(t);
   const where = whereIs(hero.x, hero.z, hero.y);
   if (where !== lastWhere) { whereEl.textContent = where; lastWhere = where; }
-  const car = cars.driving;
-  const prompt = car ? `${Math.round(Math.abs(car.speed) * 60 * 2.237)} mph · E to get out` : hero.alive && cars.nearest() ? 'E: get in the car' : '';
+  const car = cars.driving, bike = bikes.riding;
+  const mph = v => Math.round(Math.abs(v) * 60 * 2.237);
+  const prompt = car ? `${mph(car.speed)} mph · E to get out` : bike ? `${mph(bike.speed)} mph · E to get off`
+    : !hero.alive ? '' : bikes.nearest() ? 'E: ride the fixie' : cars.nearest() ? 'E: get in the car' : '';
   if (promptEl.textContent !== prompt) promptEl.textContent = prompt;
   const target = game.target;
   mini.draw(hero, target, gangsters);
@@ -484,6 +544,6 @@ setMode('walk');
 frame();
 
 window.heights = {
-  hero, keys, queued, tick, goTo, setMode, camera, scene, renderer, traffic, walkers, PLACES, mini, game, gangsters, state, cars,
+  hero, keys, queued, tick, goTo, setMode, camera, scene, renderer, traffic, walkers, PLACES, mini, game, gangsters, state, cars, bikes,
   get yaw() { return walkYaw; }, set yaw(v) { walkYaw = v; },   // where he's looking (and aiming)
 };

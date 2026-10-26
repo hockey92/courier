@@ -1,6 +1,6 @@
-// The Brooklyn Heights minimap: the street map drawn once in Google Maps' colours (white streets, grey blocks,
-// green parks, blue water, yellow highways), turned so true north is up, with the hero's arrow. Tab opens it
-// full screen, where a click picks a spot to go to.
+// The 3D maps' minimap: the street map drawn once in Google Maps' colours (white streets, grey blocks, green
+// parks, blue water, yellow highways), turned so true north is up, with the hero's arrow. Tab opens it full
+// screen, where a click picks a spot to go to. Brooklyn Heights' map is drawn here; another map passes its own.
 import {
   BOROUGH_HALL, BQE, BRIDGE, CELLS, DESCENTS, EW, FEDERAL_COURT, FURMAN, GRID_TILT, LABELS, LANDING, NS, ONE_BBP,
   PIERS, PLOTS, PROMENADE, SQUIBB, SUPREME_COURT, UPLAND, WAR_MEMORIAL,
@@ -68,8 +68,10 @@ function drawMap() {
   return c;
 }
 
-export function createMinimap(mini, big, onPick) {
-  const map = drawMap();
+// src: { canvas, area: { x0, z0 } (the world point at its top left), px (pixels per metre), tilt (the grid's turn
+// from true north) }
+export function createMinimap(mini, big, onPick, src = { canvas: drawMap(), area: AREA, px: PX, tilt: GRID_TILT }) {
+  const map = src.canvas, { area, px, tilt } = src;
   const mg = mini.getContext('2d'), bg = big.getContext('2d');
   let open = false, fit = null;
   const arrow = (g, x, y, a, s) => {
@@ -79,10 +81,10 @@ export function createMinimap(mini, big, onPick) {
     g.fill(); g.stroke(); g.restore();
   };
   // the map's pixel for a world point, and the screen transform for the big map
-  const mx = x => (x - AREA.x0) * PX, mz = z => (z - AREA.z0) * PX;
+  const mx = x => (x - area.x0) * px, mz = z => (z - area.z0) * px;
   function layout() {
     big.width = innerWidth; big.height = innerHeight;
-    const w = map.width, h = map.height, c = Math.cos(GRID_TILT), s = Math.sin(GRID_TILT);
+    const w = map.width, h = map.height, c = Math.cos(tilt), s = Math.sin(tilt);
     const k = Math.min(big.width / (w * c + h * s), big.height / (w * s + h * c)) * 0.96;
     fit = { k, cx: big.width / 2, cy: big.height / 2 };
   }
@@ -100,24 +102,24 @@ export function createMinimap(mini, big, onPick) {
     if (!fit) layout();
     const { k, cx, cy } = fit;
     bg.fillStyle = '#000c'; bg.fillRect(0, 0, big.width, big.height);
-    bg.save(); bg.translate(cx, cy); bg.rotate(GRID_TILT); bg.scale(k, k);
+    bg.save(); bg.translate(cx, cy); bg.rotate(tilt); bg.scale(k, k);
     bg.drawImage(map, -map.width / 2, -map.height / 2);
     bg.restore();
     if (target) pin(bg, ...toScreen(target.x, target.z), 1.3);
     const [hx, hy] = toScreen(hero.x, hero.z);
-    arrow(bg, hx, hy, GRID_TILT + hero.heading, 1.4);
+    arrow(bg, hx, hy, tilt + hero.heading, 1.4);
     bg.fillStyle = '#fff'; bg.font = '600 14px system-ui, sans-serif'; bg.textAlign = 'center';
     bg.fillText('Click anywhere on land to go there · Tab or Esc to close', big.width / 2, big.height - 18);
   }
   function toScreen(x, z) {
-    const { k, cx, cy } = fit, px = (mx(x) - map.width / 2) * k, py = (mz(z) - map.height / 2) * k;
-    const c = Math.cos(GRID_TILT), s = Math.sin(GRID_TILT);
-    return [cx + px * c - py * s, cy + px * s + py * c];
+    const { k, cx, cy } = fit, qx = (mx(x) - map.width / 2) * k, qy = (mz(z) - map.height / 2) * k;
+    const c = Math.cos(tilt), s = Math.sin(tilt);
+    return [cx + qx * c - qy * s, cy + qx * s + qy * c];
   }
   function toWorld(sx, sy) {
-    const { k, cx, cy } = fit, c = Math.cos(GRID_TILT), s = Math.sin(GRID_TILT);
-    const dx = sx - cx, dy = sy - cy, px = (dx * c + dy * s) / k, py = (-dx * s + dy * c) / k;
-    return [(px + map.width / 2) / PX + AREA.x0, (py + map.height / 2) / PX + AREA.z0];
+    const { k, cx, cy } = fit, c = Math.cos(tilt), s = Math.sin(tilt);
+    const dx = sx - cx, dy = sy - cy, qx = (dx * c + dy * s) / k, qy = (-dx * s + dy * c) / k;
+    return [(qx + map.width / 2) / px + area.x0, (qy + map.height / 2) / px + area.z0];
   }
   big.addEventListener('click', e => {
     const [x, z] = toWorld(e.clientX, e.clientY);
@@ -132,20 +134,20 @@ export function createMinimap(mini, big, onPick) {
     // goal: the next turf's spot, or null; foes: the gangsters, shown as red dots
     draw(hero, goal = null, foes = []) {
       target = goal;
-      const w = mini.width, h = mini.height, c = Math.cos(GRID_TILT), s = Math.sin(GRID_TILT);
+      const w = mini.width, h = mini.height, c = Math.cos(tilt), s = Math.sin(tilt);
       // a world point on the minimap, kept to its edge when it's further away
       const onMini = (x, z, edge) => {
-        const dx = (x - hero.x) * PX, dz = (z - hero.z) * PX;
-        let px = dx * c - dz * s, py = dx * s + dz * c;
-        const r = Math.hypot(px, py), max = w / 2 - edge;
-        if (r > max) { px *= max / r; py *= max / r; }
-        return [w / 2 + px, h / 2 + py];
+        const dx = (x - hero.x) * px, dz = (z - hero.z) * px;
+        let qx = dx * c - dz * s, qy = dx * s + dz * c;
+        const r = Math.hypot(qx, qy), max = w / 2 - edge;
+        if (r > max) { qx *= max / r; qy *= max / r; }
+        return [w / 2 + qx, h / 2 + qy];
       };
       mg.clearRect(0, 0, w, h);
       mg.save();
       mg.beginPath(); mg.arc(w / 2, h / 2, w / 2 - 2, 0, Math.PI * 2); mg.clip();
       mg.fillStyle = '#a3cdf1'; mg.fillRect(0, 0, w, h);
-      mg.translate(w / 2, h / 2); mg.rotate(GRID_TILT);
+      mg.translate(w / 2, h / 2); mg.rotate(tilt);
       mg.drawImage(map, -mx(hero.x), -mz(hero.z));
       mg.restore();
       mg.fillStyle = '#d93025';
@@ -155,7 +157,7 @@ export function createMinimap(mini, big, onPick) {
         mg.beginPath(); mg.arc(fx, fy, 3.5, 0, Math.PI * 2); mg.fill();
       }
       if (goal) pin(mg, ...onMini(goal.x, goal.z, 4), 0.9);
-      arrow(mg, w / 2, h / 2, GRID_TILT + hero.heading, 1);
+      arrow(mg, w / 2, h / 2, tilt + hero.heading, 1);
       mg.fillStyle = '#202124'; mg.font = '700 11px system-ui, sans-serif'; mg.textAlign = 'center';
       mg.fillText('N', w / 2, 14);
       if (open) drawBig(hero);

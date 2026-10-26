@@ -16,7 +16,8 @@ import { cars, updateTraffic } from './traffic.js';
 import { flying, grab, renderCarry, updateCarry } from './carry.js';
 import { bottles, renderBottles } from './bottles.js';
 import { renderSewer, sewer, updateSewer } from './sewer.js';
-import { holdAtGate, startBlock, updateBlocks, wave } from './blocks.js';
+import { holdAtGate, setZombieMode, startBlock, updateBlocks, wave } from './blocks.js';
+import { horde } from './zombies.js';
 import { giveWeapon, pickups, putDown, renderWeapons, updateWeapons } from './weapons.js';
 
 // ---------- Update ----------
@@ -157,6 +158,6 @@ window.game = {
   roundKick() { queued.round = true; },
   grab() { queued.grab = true; },
   music, rats, setSkin, setPlayingRat, sewer,
-  state, wave, startBlock, spawnGangster, bottles, cars, flying, giveWeapon, pickups,
+  state, wave, startBlock, spawnGangster, bottles, cars, flying, giveWeapon, pickups, setZombieMode, horde,
   set paused(v) { paused = v; }, get paused() { return paused; },
 };

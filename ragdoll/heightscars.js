@@ -1,12 +1,16 @@
-// Cars he can use in Brooklyn Heights: any parked car, any car in the street traffic (out you get, driver),
-// or one he's left somewhere. E gets in and out; W/S drive and reverse, A/D steer, Shift floors it, H honks.
-// It climbs curbs and the hills, stops dead against walls and other cars, and runs gangsters over.
+// Cars he can use on the 3D maps (Brooklyn Heights, Lower Manhattan): any parked car, any car in the street
+// traffic (out you get, driver), or one he's left somewhere. E gets in and out; W/S drive and reverse, A/D steer,
+// Shift floors it, H honks. It climbs curbs and the hills, stops dead against walls and other cars, and runs
+// gangsters over. What it bumps into and stands on is the map's (arena.js).
 import * as THREE from 'three';
 import { say, state } from './state.js';
 import { gangsters, man } from './actors.js';
 import { hitByCar } from './combat.js';
 import { music } from './music.js';
-import { boxesNear, floorAt, inSolid, movers, parked, props } from './heightsworld.js';
+import { arena } from './arena.js';
+
+const boxesNear = (x, r, z) => arena.boxesNear(x, r, z), floorAt = (x, z, y) => arena.floorAt(x, z, y);
+const inSolid = (x, y, z) => arena.inSolid(x, y, z);
 
 const HALF_L = 2.2, HALF_W = 0.9;
 const CLIMB = 0.25;        // curbs and the hills' steps it drives up; anything taller stops it
@@ -14,8 +18,11 @@ const REACH = 3.2;         // how close he has to be to get in
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// traffic: the street cars (heights.js), each { L, s, v, color, box, taken }; yOf(lane, s) the road's height
-export function createCars({ traffic, yOf, place }) {
+// traffic: the street cars, each { box, taken, color }; pose(car) → { x, y, z, heading, speed } where it is now;
+// trafficMesh(car), what it looks like once he's taken it (a sedan in its colour if not given); movers: the
+// map's list of moving boxes; parked: { x, y, z, ry, color, box } cars at the curb; props: { carGeo, carMat,
+// parked } (streetkit.js's buildProps)
+export function createCars({ traffic, pose, place, movers, parked, props, trafficMesh }) {
   const mine = [];      // cars he's driven: { x, y, z, heading, speed, vy, mesh, box }
   let driving = null;
 
@@ -27,11 +34,14 @@ export function createCars({ traffic, yOf, place }) {
     c.mesh.position.set(c.x, c.y, c.z);
     c.mesh.rotation.set(0, -c.heading, 0);
   }
-  function makeCar(x, y, z, heading, color, speed = 0) {
+  const sedan = color => {
     const m = props.carMat.clone();
     m.color.set(color);
     const mesh = new THREE.Mesh(props.carGeo, m);
     mesh.castShadow = mesh.receiveShadow = true;
+    return mesh;
+  };
+  function makeCar(x, y, z, heading, mesh, speed = 0) {
     props.parked.parent.add(mesh);
     const c = { x, y, z, heading, speed, vy: 0, mesh, box: { x0: 0, x1: 0, z0: 0, z1: 0, top: 0 } };
     movers.push(c.box);
@@ -51,8 +61,8 @@ export function createCars({ traffic, yOf, place }) {
     for (const p of parked) if (!p.taken) consider('parked', p, p.x, p.y, p.z);
     for (const c of traffic) {
       if (!c.box || c.taken) continue;
-      const L = c.L;
-      consider('traffic', c, L.axis === 'x' ? c.s : L.at, yOf(L, c.s), L.axis === 'x' ? L.at : c.s);
+      const p = pose(c);
+      consider('traffic', c, p.x, p.y, p.z);
     }
     return best;
   }
@@ -65,13 +75,12 @@ export function createCars({ traffic, yOf, place }) {
       p.taken = true; p.box.top = -1e9;
       props.parked.setMatrixAt(parked.indexOf(p), ZERO);
       props.parked.instanceMatrix.needsUpdate = true;
-      c = makeCar(p.x, p.y, p.z, -p.ry, p.color);
+      c = makeCar(p.x, p.y, p.z, -p.ry, sedan(p.color));
     } else {
       // a carjacking: the driver's gone, the car's his
-      const t = n.it, L = t.L;
+      const t = n.it, p = pose(t);
       t.taken = true; t.box.top = -1e9;
-      const heading = L.axis === 'x' ? (L.dir > 0 ? 0 : Math.PI) : (L.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-      c = makeCar(n.x, yOf(L, t.s), n.z, heading, t.color, t.v);
+      c = makeCar(p.x, p.y, p.z, p.heading, trafficMesh ? trafficMesh(t) : sedan(t.color), p.speed);
     }
     driving = c;
     c.vy = 0;

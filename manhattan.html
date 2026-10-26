@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lower Manhattan</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #card { position: fixed; top: 14px; left: 14px; padding: 12px 16px; border-radius: 8px; background: #000b; color: #fff; user-select: none; max-width: 60vw; }
+  #card .name { font-weight: 600; font-size: 15px; }
+  #card .where { font-size: 14px; font-weight: 700; color: #9fe0b0; margin-top: 4px; }
+  #card .sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+  #card .help { font-size: 12px; opacity: 0.85; margin-top: 10px; line-height: 1.5; }
+  #hud { margin-top: 8px; padding-top: 8px; border-top: 1px solid #fff3; }
+  #hud .turf { font-size: 20px; font-weight: 800; }
+  #hud .hearts { font-size: 20px; color: #ff4d5e; letter-spacing: 2px; }
+  #hud .crew { font-size: 14px; font-weight: 700; margin-top: 2px; }
+  #hud .crew.go { color: #ffd36b; }
+  #hud .ammo { font-size: 14px; font-weight: 700; color: #ffd36b; }
+  #hud .ammo:empty { display: none; }
+  #mini { position: fixed; top: 14px; right: 14px; border-radius: 50%; box-shadow: 0 2px 10px #0008; cursor: pointer; }
+  #bigmap { position: fixed; inset: 0; display: none; cursor: crosshair; z-index: 3; }
+  #banner { position: fixed; top: 26%; width: 100%; text-align: center; color: #fff; text-shadow: 0 3px 8px #000a; pointer-events: none; display: none; }
+  #banner .title { font: 800 38px system-ui, sans-serif; }
+  #banner .small { font: 600 16px system-ui, sans-serif; margin-top: 6px; opacity: .92; }
+  #boss { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); width: min(320px, 60vw); text-align: center; color: #fff;
+    text-shadow: 0 1px 3px #000; pointer-events: none; display: none; }
+  #boss .label { font: 800 14px system-ui, sans-serif; letter-spacing: 2px; text-transform: uppercase; }
+  #boss .bar { height: 10px; margin-top: 4px; background: #0008; border-radius: 5px; overflow: hidden; }
+  #bossFill { height: 100%; width: 100%; background: linear-gradient(#ff6a5a, #c4262e); }
+  #prompt { position: fixed; bottom: 90px; width: 100%; text-align: center; color: #fff; font: 700 16px system-ui, sans-serif;
+    text-shadow: 0 2px 5px #000; pointer-events: none; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 2; }
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="name">Lower Manhattan</div>
+  <div class="where" id="where"></div>
+  <div class="sub">From Canal St down to the Battery · streets from OpenStreetMap · late afternoon, sunny, 66°F</div>
+  <div class="sub" id="who"></div>
+  <div id="hud">
+    <div class="turf" id="turf"></div>
+    <div class="hearts" id="hearts"></div>
+    <div class="crew" id="crew"></div>
+    <div class="ammo" id="ammo"></div>
+    <div class="sub" id="score"></div>
+  </div>
+  <div class="help" id="help"></div>
+</div>
+<canvas id="mini" width="200" height="200" title="Tab for the full map"></canvas>
+<canvas id="bigmap"></canvas>
+<div id="banner"><div class="title" id="bannerTitle"></div><div class="small" id="bannerSub"></div></div>
+<div id="boss"><div class="label">Big Tony</div><div class="bar"><div id="bossFill"></div></div></div>
+<div id="prompt"></div>
+<div id="fade"></div>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module" src="ragdoll/manhattan.js"></script>
+<script>document.getElementById('mini').addEventListener('click', () => window.manhattan?.mini.toggle(true));</script>
+</body>
+</html>

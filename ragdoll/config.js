@@ -4,7 +4,7 @@
 export const S = 0.015;
 export const GRAVITY = 0.45 * S, RUN_SPEED = 7 * S, JUMP_V = 9.5 * S;
 export const THIGH = 28 * S, SHIN = 28 * S, TORSO = 42 * S, NECK = 14 * S, UARM = 22 * S, FARM = 22 * S;
-export const HEAD = 19 * S, JOINT_GAP = 5 * S;
+export const HEAD = 19 * S;
 export const HIP_W = 0.1, SH_W = 0.2, BODY_R = 0.22;
 export const Z_MIN = -4.7, Z_MAX = 5.6;
 export const CHUNK = 16, FAR_CHUNK = 160;

@@ -250,6 +250,22 @@ export const music = (() => {
     hiss(ctx.currentTime, 0.05, 0.12, 1500);
   }
 
-  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, honk, smash, bang, dryFire, whoosh, bonk, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
+  // a zombie's low, wobbly moan
+  function groan() {
+    if (!ctx || !on) return;
+    const t = ctx.currentTime, f = 110 + Math.random() * 40;
+    blip('sawtooth', f, f * 0.6, t, 0.8, 0.03);
+    blip('square', f * 1.03, f * 0.58, t + 0.05, 0.75, 0.015);
+  }
+
+  // a bike bell: two bright dings
+  function bell() {
+    if (!ctx || !on) return;
+    for (const k of [0, 0.16]) { blip('sine', 2650, 2600, ctx.currentTime + k, 0.45, 0.05); blip('triangle', 5300, 5200, ctx.currentTime + k, 0.2, 0.01); }
+  }
+  // a back tyre skidding on the asphalt
+  function skid() { if (ctx && on) hiss(ctx.currentTime, 0.12, 0.04, 1800); }
+
+  return { start, toggle, squeak, fall, plop, cheer, clink, alarm, honk, smash, bang, dryFire, whoosh, bonk, groan, bell, skid, get playing() { return !!ctx && ctx.state === 'running' && on; }, get step() { return step; } };
 })();
 addEventListener('pointerdown', () => music.start());

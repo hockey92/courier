@@ -1,5 +1,5 @@
-// Gangsters: the kinds of gangster, spawning them, their fighting brains, landing punches, kicks,
-// bottles and Big Tony's charge, stomps, clearing away the knocked-out ones, and getting busted.
+// Gangsters (and zombie night's zombies): the kinds, spawning them, their fighting brains, landing punches,
+// kicks, bottles and Big Tony's charge, stomps, clearing away the knocked-out ones, and getting busted.
 import * as THREE from 'three';
 import { BODY_R, JUMP_V, S, Z_MAX, Z_MIN } from './config.js';
 import { say, state } from './state.js';
@@ -24,6 +24,12 @@ export const GANG_TYPES = {
   thrower: { name: 'Bottle Thrower', hp: 2, speed: 4.4, accel: 0.07, windup: 18, kickWindup: 16, kickChance: 1, punch: 1, kick: 2, gap: 40 },
   // Big Tony: heavy hits, and a charge that leaves him dizzy if he runs into something
   boss: { name: 'Big Tony', hp: 14, speed: 4.2, accel: 0.06, windup: 28, kickWindup: 22, kickChance: 0.35, punch: 2, kick: 3, gap: 55, mass: 2.6, bulk: 1.65, armored: true },
+  // zombie night (zombies.js): they shamble after him with their arms out and lunge to grab him
+  zombie: { name: 'Zombie', hp: 2, speed: 2.4, accel: 0.04, windup: 26, kickWindup: 20, kickChance: 0, punch: 1, kick: 1, gap: 50, zombie: true },
+  // quick and fragile
+  sprinter: { name: 'Sprinter', hp: 1, speed: 5.6, accel: 0.08, windup: 16, kickWindup: 16, kickChance: 0, punch: 1, kick: 1, gap: 40, zombie: true },
+  // slow and huge: shrugs off punches; a stomp only hurts him
+  brute: { name: 'Brute', hp: 7, speed: 2.1, accel: 0.04, windup: 30, kickWindup: 24, kickChance: 0, punch: 2, kick: 2, gap: 60, mass: 2, bulk: 1.5, armored: true, zombie: true },
 };
 export const CHARGE_WINDUP = 50, CHARGE_TIME = 80;
 export const IDLE = [0, 0, false, false, false];
@@ -35,11 +41,12 @@ export function behind() {
   return { x: man.x - dir * (state.camMode === 'behind' ? 26 : 20), z: Z_MIN + 0.5 + Math.random() * (Z_MAX - Z_MIN - 1) };
 }
 
-// aggro > 1 shortens the pauses between swings and throws
-export function spawnGangster(type = 'thug', extraHp = 0, aggro = 1) {
-  const kind = GANG_TYPES[type], p = arena.spawnAt ? arena.spawnAt() : behind(), hp = kind.hp + extraHp;
+// aggro > 1 shortens the pauses between swings and throws; at: where to put him, { x, z } (default: the
+// arena's spawn spot, or just out of view)
+export function spawnGangster(type = 'thug', extraHp = 0, aggro = 1, at = null) {
+  const kind = GANG_TYPES[type], p = at || (arena.spawnAt ? arena.spawnAt() : behind()), hp = kind.hp + extraHp;
   const g = new Ragdoll(p.x, p.z, {
-    y: p.y || 0, style: 'gangster', look: GANGSTER_LOOKS[type], canFlip: false, type, kind, aggro,
+    y: p.y || 0, style: 'gangster', look: GANGSTER_LOOKS[type], canFlip: false, type, kind, aggro, zombie: !!kind.zombie,
     hp, maxHp: hp, mass: kind.mass || 1, bulk: kind.bulk || 1,
     speed: (kind.speed + Math.random()) * S, accel: kind.accel + Math.random() * 0.03,
     windup: kind.windup, kickWindup: kind.kickWindup, punchCooldown: 30,
@@ -69,6 +76,11 @@ export function gangsterBrain(g) {
   if (g.type === 'thrower' && dist > 1.6) go = dist > 7.5 ? 1 : dist < 4.5 ? -1 : 0;
   if (g.attacking) go = 0;
   let ix = ux * go, iz = uz * go;
+  // zombies weave from side to side as they shamble after him
+  if (k.zombie && go > 0 && dist > 2) {
+    const weave = Math.sin(g.idle * 0.7) * 0.35;
+    ix -= uz * weave; iz += ux * weave;
+  }
   // keep tracking him through the wind-up (or while standing off), but commit once the blow is on its way
   const windingUp = g.punchT >= 0 ? g.punchT < g.punchW : g.kickT >= 0 ? g.kickT < g.kickW : true;
   if ((dist < 1.6 || go === 0) && dist > 1e-4 && windingUp) {
@@ -120,7 +132,7 @@ export function gangsterBrain(g) {
           b.top > g.y + 0.05 && b.top - g.y < 1.45) jump = true;
     }
   }
-  if (!jump && g.jumpCooldown <= 0 && g.onGround && dist < 2.2 && !man.onGround && Math.random() < 0.04) {
+  if (!jump && !k.zombie && g.jumpCooldown <= 0 && g.onGround && dist < 2.2 && !man.onGround && Math.random() < 0.04) {
     jump = true;
     g.jumpCooldown = 90 + Math.random() * 60;
   }
@@ -169,6 +181,11 @@ export function getBusted(nx, nz) {
   man.knockOut(nx, nz, 1e9); // stays down until the run restarts (blocks.js)
   state.shake = 0.3;
   state.caughtTimer = 210;
+  if (state.zombies) {
+    const n = state.zWave - 1;
+    say('The zombies got you!', `${n ? `You survived ${n} wave${n > 1 ? 's' : ''}. ` : ''}Back to wave 1…`, 170);
+    return;
+  }
   const n = state.cleared;
   say('Busted!', `${n ? `You cleared ${n} block${n > 1 ? 's' : ''}. ` : ''}Back to the start of the street…`, 170);
 }
@@ -280,9 +297,9 @@ export function checkHits() {
     const nx = d > 1e-4 ? dx / d : 1, nz = d > 1e-4 ? dz / d : 0;
     const feetAboveG = man.y - g.y;
     if (feetAboveG > 1.25 && feetAboveG < 1.95 && man.vy < 0 && g.stompCd <= 0) {
-      // landed on his head: out cold, except Big Tony, who just takes a beating
+      // landed on his head: out cold, except Big Tony and the brutes, who just take a beating
       man.vy = JUMP_V * 0.9; man.onGround = false; man.jumpsLeft = 1;
-      if (g.type === 'boss') { hurtGangster(g, 3, 1.2, -nx, -nz); g.stompCd = 45; }
+      if (g.type === 'boss' || g.type === 'brute') { hurtGangster(g, 3, 1.2, -nx, -nz); g.stompCd = 45; }
       else downGangster(g, -nx, -nz);
       state.shake = Math.max(state.shake, 0.15);
       dust(g.pts.head.x, g.pts.head.y, g.pts.head.z, 8);

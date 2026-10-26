@@ -1,6 +1,6 @@
 // Looks: the gangsters' suits and the hero's skins.
 import * as THREE from 'three';
-import { cylGeo, mat } from './materials.js';
+import { mat } from './materials.js';
 
 // ---------- Looks: the gangsters' suits and the hero's skins ----------
 // eyes, brows, ears and nose; most faces start from this
@@ -113,16 +113,83 @@ export const GANGSTER_LOOKS = {
       hands(k, '#d9a07a', '#f4f1ea');
     },
   },
+
+  // zombie night: cartoon zombies, green and scruffy, nothing gory
+  zombie: {
+    top: '#b9b4a2', arms: '#8fae6a', legs: '#4b4f6a', skin: '#8fae6a',
+    shoes: { color: '#3a2e26' },
+    // a torn office shirt and loosened tie, messy hair, glowing eyes and a dopey open mouth
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      zombieFace(k, '#3d3a2e');
+      deco(head, 0.31, 0.06, 0.3, mat('#3d3a2e'), -0.01, h + 0.02, 0);                    // messy hair
+      deco(head, 0.08, 0.08, 0.06, mat('#3d3a2e'), 0.02, h + 0.06, 0.08);                 // tuft sticking up
+      deco(torso, 0.025, 0.2, 0.045, mat('#5a6a8a'), 0.13, tl - 0.16, 0.03);              // loose tie, askew
+      deco(torso, 0.022, 0.09, 0.08, mat('#8a8470'), 0.124, -0.05, -0.07);                // dirty patch
+      deco(torso, 0.022, 0.06, 0.06, mat('#8fae6a'), 0.124, -tl + 0.08, 0.08);            // a hole in the shirt
+      deco(torso, 0.022, 0.05, 0.07, mat('#8a8470'), -0.124, 0.05, 0.05);                 // patch on the back
+      hands(k, '#8fae6a');
+    },
+  },
+
+  sprinter: {
+    top: '#6a4c8a', legs: '#2f3340', skin: '#9cc07a',
+    shoes: { color: '#e8e8e8', sole: '#bdbdbd', stripe: '#6a4c8a' },
+    // a faded purple hoodie with the hood up and worn-out sneakers
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const hood = mat('#5a3f78');
+      zombieFace(k, '#2a2a22');
+      deco(head, 0.3, 0.06, 0.32, hood, -0.02, h + 0.02, 0);                              // hood over the top
+      deco(head, 0.04, 0.3, 0.32, hood, -h - 0.02, -0.02, 0);                             // and down the back
+      for (const s of [-1, 1]) deco(head, 0.26, 0.28, 0.02, hood, -0.02, 0, s * (h + 0.012)); // round the sides
+      deco(torso, 0.02, 0.12, 0.2, mat('#5a3f78'), 0.125, -tl + 0.12, 0);                 // front pocket
+      deco(torso, 0.022, 0.07, 0.07, mat('#857a6a'), 0.124, 0.06, 0.08);                  // dirty patch
+      hands(k, '#9cc07a', '#5a3f78');
+    },
+  },
+
+  brute: {
+    top: '#3e6a8a', arms: '#7a9a5a', legs: '#3e6a8a', skin: '#7a9a5a',
+    shoes: { color: '#2a1d16', sole: '#1a120c' },
+    // huge, bald and stitched together, in ripped dungarees over a bare chest
+    decorate(k) {
+      const { head, torso, deco, h, tl } = k;
+      const stitch = mat('#2a2a22'), skinM = mat('#7a9a5a');
+      zombieFace(k, '#2a2a22');
+      deco(head, 0.2, 0.012, 0.012, stitch, 0, h + 0.004, 0.02);                          // stitches across the scalp
+      for (const x of [-0.06, 0, 0.06]) deco(head, 0.012, 0.012, 0.05, stitch, x, h + 0.006, 0.02);
+      deco(torso, 0.022, 0.14, 0.2, skinM, 0.122, tl - 0.07, 0);                          // bare chest above the bib
+      for (const s of [-1, 1]) deco(torso, 0.024, 0.2, 0.04, mat('#2f5470'), 0.125, tl - 0.1, s * 0.11); // straps
+      deco(torso, 0.024, 0.03, 0.03, mat('#c9a24a'), 0.127, tl - 0.2, 0.11);              // strap button
+      deco(torso, 0.022, 0.08, 0.06, skinM, 0.124, -tl + 0.1, -0.06);                     // rip in the bib
+      hands(k, '#7a9a5a');
+    },
+  },
 };
+
+// pale glowing eyes with dark rings, a brow line, ears and a dopey open mouth
+export function zombieFace({ head, deco, skin, h }, brow) {
+  const glow = mat('#f2f5b0', { emissive: 0x8a8a30 }), ring = mat('#5a6a40');
+  for (const s of [-1, 1]) {
+    deco(head, 0.016, 0.06, 0.06, ring, h + 0.003, 0.01, s * 0.06);
+    deco(head, 0.02, 0.035, 0.035, glow, h + 0.006, 0.01, s * 0.06);
+    deco(head, 0.02, 0.015, 0.07, mat(brow), h + 0.006, 0.055, s * 0.055);
+    deco(head, 0.05, 0.07, 0.02, skin, 0, -0.005, s * (h + 0.01));
+  }
+  deco(head, 0.04, 0.045, 0.04, skin, h + 0.012, -0.025, 0);                              // nose
+  deco(head, 0.02, 0.045, 0.08, mat('#2a1a1a'), h + 0.006, -0.085, 0);                    // open mouth
+  deco(head, 0.022, 0.015, 0.025, mat('#e8e2c8'), h + 0.008, -0.068, 0.02);               // a tooth
+}
 
 export const SKINS = {
   newyorker: {
     name: 'New Yorker',
     top: '#8a8e96', legs: '#3d5a86', skin: '#e3b08a',
     shoes: { color: '#f2f2f2', sole: '#d8c7a0', stripe: '#c62a2a' },
-    // NY cap, grey hoodie, jeans, sneakers and a coffee to go
+    // NY cap, grey hoodie, jeans and sneakers
     decorate(k) {
-      const { r, g, head, torso, deco, skin, h, tl } = k;
+      const { head, torso, deco, h, tl } = k;
       const hair = mat('#3b2a20'), cap = mat('#1d2b4f'), white = mat('#f4f4f4'), rib = '#71757d';
       deco(head, 0.3, 0.11, 0.3, cap, 0, h - 0.01, 0);                                    // cap crown
       deco(head, 0.04, 0.03, 0.04, cap, 0, h + 0.055, 0);                                 // cap button
@@ -141,13 +208,6 @@ export const SKINS = {
       deco(torso, 0.25, 0.05, 0.33, mat(rib), 0, -tl + 0.025, 0);                         // waistband
       for (const zz of [-0.04, 0.04]) deco(torso, 0.015, 0.13, 0.015, white, 0.128, tl - 0.1, zz); // drawstrings
       hands(k, '#e3b08a', rib);
-      // blue-and-white diner coffee cup
-      const cup = r.cup = new THREE.Group();
-      for (const [rt, rb, hh, color, y] of [[0.05, 0.04, 0.13, '#2c62b8', 0], [0.049, 0.047, 0.035, '#f4f4f4', 0.005], [0.054, 0.054, 0.02, '#f4f4f4', 0.075]]) {
-        const c = new THREE.Mesh(cylGeo(rt, rb, hh), mat(color));
-        c.position.y = y; c.castShadow = true; cup.add(c);
-      }
-      g.add(cup);
     },
   },
 
@@ -239,8 +299,8 @@ export const SKINS = {
       hands(k, '#e8b99a', '#35605a');
       // the legs' +x faces backwards (they point down), so the faded fronts of the jeans are at -x
       const fade = mat('#53565d'), sock = mat('#f2f2ee');
-      for (const thigh of [r.parts.thighL, r.parts.thighR]) deco(thigh, 0.01, 0.26, 0.13, fade, -0.083, 0.02, 0);
-      for (const shin of [r.parts.shinL, r.parts.shinR]) deco(shin, 0.155, 0.06, 0.155, sock, 0, 0.14, 0);
+      for (const thigh of [r.parts.thighL, r.parts.thighR]) deco(thigh, 0.01, 0.26, 0.13, fade, -0.08, 0.02, 0);
+      for (const shin of [r.parts.shinL, r.parts.shinR]) deco(shin, 0.162, 0.06, 0.162, sock, 0, 0.14, 0);
       // olive canvas duffel, hanging from the right hand (placed in updateMeshes)
       const bag = r.bag = new THREE.Group(), olive = mat('#5b5a36'), strap = mat('#8f7a4e');
       for (const x of [-0.07, 0.07]) deco(bag, 0.025, 0.14, 0.02, strap, x, -0.06, 0);   // handles

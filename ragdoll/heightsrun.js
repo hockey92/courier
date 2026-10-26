@@ -2,14 +2,16 @@
 // minimap) shows where the next crew hangs out; get there and they come at you; knock them all out to clear
 // the turf, get two hearts back, and the next one lights up. Every fifth turf is Big Tony's. A basket of
 // apples waits at each: the only weapon here. Busted sends you back to the Promenade to start again.
+// Zombie night (Z, zombies.js) swaps the turfs for endless zombie waves that come at him wherever he is.
 import * as THREE from 'three';
 import { say, state } from './state.js';
 import { scene } from './scene.js';
 import { music } from './music.js';
 import { gangsters, man } from './actors.js';
 import { clearGangsters, spawnGangster } from './combat.js';
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, stockPickups } from './weapons.js';
 import { DEBUT, TIPS, wavePlan } from './waves.js';
+import { startHorde, updateHorde } from './zombies.js';
 
 // in order; after the tenth they come round again with bigger crews
 export const TURFS = [
@@ -24,12 +26,15 @@ export const TURFS = [
   { name: 'Cranberry St', x: 250, z: -530 },
   { name: 'the War Memorial', x: 660, z: -650 },
 ];
-export const turfOf = n => TURFS[(n - 1) % TURFS.length];
+let turfs = TURFS, bestKey = 'ragdollBestTurfs';
+export const turfOf = n => turfs[(n - 1) % turfs.length];
 const ARRIVE = 32;      // how close he has to get before the crew comes out
 const STRAY = 48;       // a gangster further off than this comes back round near him
 
-// opts: spotNear(x, z) → [x, y, z] or null, place(ragdoll, x, z, y), outdoors(x, z), home { x, z, heading }
-export function createRun({ spotNear, place, outdoors, home }) {
+// opts: spotNear(x, z) → [x, y, z] or null, place(ragdoll, x, z, y), outdoors(x, z), home { name, x, z, heading }
+// (where getting busted sends him back to); another map passes its own turf list and the key its best is kept under
+export function createRun({ spotNear, place, outdoors, home, turfList = TURFS, bestTurfsKey = 'ragdollBestTurfs' }) {
+  turfs = turfList; bestKey = bestTurfsKey;
   const run = { phase: 'travel', queue: [], max: 2, bossHp: 0, spawnT: 0, spot: null };
 
   // the beacon over the next turf: a column of light you can see from across the neighbourhood
@@ -73,7 +78,7 @@ export function createRun({ spotNear, place, outdoors, home }) {
   }
   function cleared() {
     state.cleared = state.block;
-    if (state.cleared > state.bestBlocks) { state.bestBlocks = state.cleared; localStorage.setItem('ragdollBestTurfs', state.bestBlocks); }
+    if (state.cleared > state.bestBlocks) { state.bestBlocks = state.cleared; localStorage.setItem(bestKey, state.bestBlocks); }
     const before = man.hp;
     man.hp = Math.min(man.maxHp, man.hp + 2);
     const healed = man.hp - before, next = turfOf(state.block + 1);
@@ -81,6 +86,12 @@ export function createRun({ spotNear, place, outdoors, home }) {
     run.phase = 'cleared';
     run.spawnT = 200;
     say('Turf cleared!', `${healed ? `+${healed} heart${healed > 1 ? 's' : ''} · ` : ''}Next: ${next.name}`, 200);
+  }
+  // the turfs, or zombie night, from the beginning
+  function begin() {
+    state.cleared = 0; state.knockouts = 0; state.survived = 0; state.fade = 0;
+    if (state.zombies) { beacon.visible = false; startHorde(1); }
+    else { start(1); stockPickups(); }
   }
   function reset() {
     clearGangsters();
@@ -90,19 +101,34 @@ export function createRun({ spotNear, place, outdoors, home }) {
     const s = spotNear(home.x, home.z);
     place(man, s[0], s[2], s[1], home.heading);
     Object.assign(man, { invuln: 90, stun: 0, hp: man.maxHp });
-    state.cleared = 0; state.knockouts = 0; state.survived = 0; state.fade = 0;
-    start(1);
+    begin();
+  }
+  // zombie night on or off (Z): starts again from the beginning right where he is
+  function setZombies(on) {
+    if (state.caughtTimer > 0 || on === state.zombies || !man.alive) return;
+    state.zombies = on;
+    state.zBreak = 0;
+    clearGangsters();
+    Object.assign(man, { invuln: 90, hp: man.maxHp });
+    begin();
   }
 
   function update() {
     if (state.caughtTimer > 0) {
-      // busted: black out, then back to the Promenade
-      if (state.caughtTimer === 210) {
+      // busted: black out, then back home
+      if (state.caughtTimer === 210 && !state.zombies) {
         const n = state.cleared;
-        say('Busted!', `${n ? `You cleared ${n} turf${n > 1 ? 's' : ''}. ` : ''}Back to the Promenade…`, 170);
+        say('Busted!', `${n ? `You cleared ${n} turf${n > 1 ? 's' : ''}. ` : ''}Back to ${home.name}…`, 170);
       }
       if (state.caughtTimer <= 40) state.fade = (41 - state.caughtTimer) / 40;
       if (state.caughtTimer === 1) reset();
+      return;
+    }
+    if (state.zombies) {
+      // they come from all round him, and anyone left behind comes back round near him
+      run.spot = { x: man.x, y: man.y, z: man.z };
+      updateHorde();
+      comeBack();
       return;
     }
     let standing = 0;
@@ -127,14 +153,17 @@ export function createRun({ spotNear, place, outdoors, home }) {
       spawnGangster(type, type === 'boss' ? run.bossHp : 0, 1 + 0.05 * (state.block - 1));
       run.spawnT = 50 + Math.random() * 60;
     }
-    // stragglers left behind (he ran off, or they got stuck round a corner) come back round near him
+    comeBack();
+    if (state.crewLeft === 0) cleared();
+  }
+  // stragglers left behind (he ran off, or they got stuck round a corner) come back round near him
+  function comeBack() {
     for (const g of gangsters) {
       if (g.alive && !g.leaveT && Math.hypot(g.x - man.x, g.z - man.z) > STRAY) {
         const p = spawnAt();
         place(g, p.x, p.z, p.y);
       }
     }
-    if (state.crewLeft === 0) cleared();
   }
 
   function render(t) {
@@ -142,7 +171,7 @@ export function createRun({ spotNear, place, outdoors, home }) {
     beam.material.opacity = 0.26 + Math.sin(t * 3) * 0.06;
   }
 
-  return { run, start, update, render, spawnAt, pickupAt, get target() { return run.phase === 'travel' ? run.spot : null; } };
+  return { run, start, update, render, spawnAt, pickupAt, setZombies, get target() { return run.phase === 'travel' && !state.zombies ? run.spot : null; } };
 }
 const cap = s => s[0].toUpperCase() + s.slice(1);
 
@@ -152,12 +181,18 @@ export function updateHud(distance) {
   $('hearts').textContent = man.hp > 0 ? '♥'.repeat(man.hp) + '♡'.repeat(Math.max(0, man.maxHp - man.hp)) : '';
   const w = man.weapon;
   $('ammo').textContent = w ? `${WEAPONS[w.type].name}: ${w.ammo}` : '';
-  const t = turfOf(state.block);
-  $('turf').textContent = `Turf ${state.block}: ${cap(t.name)}`;
-  const crew = $('crew');
-  crew.textContent = distance !== null ? `Go to ${t.name}: ${Math.round(distance)} m` : `Crew left: ${state.crewLeft}`;
-  crew.classList.toggle('go', distance !== null);
-  $('score').textContent = `Best: ${state.bestBlocks} turf${state.bestBlocks === 1 ? '' : 's'} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
+  const t = turfOf(state.block), crew = $('crew');
+  if (state.zombies) {
+    $('turf').textContent = `Zombie wave ${state.zWave}`;
+    crew.textContent = state.zBreak > 0 ? `Next wave in ${Math.ceil(state.zBreak / 60)}…` : `Zombies left: ${state.crewLeft}`;
+    crew.classList.toggle('go', state.zBreak > 0);
+  } else {
+    $('turf').textContent = `Turf ${state.block}: ${cap(t.name)}`;
+    crew.textContent = distance !== null ? `Go to ${t.name}: ${Math.round(distance)} m` : `Crew left: ${state.crewLeft}`;
+    crew.classList.toggle('go', distance !== null);
+  }
+  const best = state.zombies ? `wave ${state.bestWave}` : `${state.bestBlocks} turf${state.bestBlocks === 1 ? '' : 's'}`;
+  $('score').textContent = `Best: ${best} · KOs: ${state.knockouts} · Time: ${Math.floor(state.survived)}s`;
   const b = state.banner, banner = $('banner');
   banner.style.display = b ? 'block' : 'none';
   if (b) { $('bannerTitle').textContent = b.text; $('bannerSub').textContent = b.sub; }

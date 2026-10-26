@@ -10,11 +10,14 @@ canvas { display: block; }
 #skinName { min-width: 150px; text-align: center; font-weight: 700; }
 #skins button { background: #fff2; color: #fff; border: 0; border-radius: 6px; width: 28px; height: 26px; cursor: pointer; font-size: 12px; }
 #skins button:hover { background: #fff4; }
-#camBtn, #playBtn, #streetBtn { position: fixed; top: 58px; right: 18px; background: #0006; color: #fff; border: 0; border-radius: 10px;
+#camBtn, #playBtn, #zombieBtn, #streetBtn { position: fixed; top: 58px; right: 18px; background: #0006; color: #fff; border: 0; border-radius: 10px;
   padding: 6px 12px; font: 600 13px system-ui, sans-serif; cursor: pointer; text-shadow: 0 1px 3px #000; }
 #playBtn { top: 94px; }
-#streetBtn { top: 130px; display: none; background: #2e6b45cc; }
-#camBtn:hover, #playBtn:hover { background: #000a; }
+#zombieBtn { top: 130px; }
+#zombieBtn.on { background: #4f7a2ecc; }
+#streetBtn { top: 166px; display: none; background: #2e6b45cc; }
+#camBtn:hover, #playBtn:hover, #zombieBtn:hover { background: #000a; }
+#zombieBtn.on:hover { background: #3f6224; }
 #streetBtn:hover { background: #245437; }
 #hud .hearts { font-size: 22px; color: #ff4d5e; letter-spacing: 2px; margin-top: 2px; }
 #hud .ammo { font-size: 15px; font-weight: 700; color: #ffd36b; margin-top: 2px; }
@@ -30,4 +33,3 @@ canvas { display: block; }
 #boss .name { font: 800 14px system-ui, sans-serif; letter-spacing: 2px; text-transform: uppercase; }
 #boss .bar { height: 10px; margin-top: 4px; background: #0008; border-radius: 5px; overflow: hidden; }
 #bossFill { height: 100%; width: 100%; background: linear-gradient(#ff6a5a, #c4262e); }
-#help { position: fixed; bottom: 12px; width: 100%; text-align: center; color: #fffc; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; }

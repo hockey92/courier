@@ -12,6 +12,10 @@ export const state = {
   // the run: which block you're on, how many you've cleared, who's left to knock out
   block: 1, cleared: 0, crewLeft: 0, gateOpen: false,
   bestBlocks: +localStorage.getItem('ragdollBestBlocks') || 0,
+  // zombie night (zombies.js): endless zombie waves instead of the blocks; zWave: the wave you're on;
+  // zBreak: frames until the next wave (0 while one is on)
+  zombies: false, zWave: 1, zBreak: 0,
+  bestWave: +localStorage.getItem('ragdollBestWave') || 0,
   // score and feedback
   survived: 0, knockouts: 0, shake: 0, caughtTimer: 0,
   // the big message in the middle of the screen: { text, sub, t } with t in frames
