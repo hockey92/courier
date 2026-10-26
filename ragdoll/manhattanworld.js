@@ -198,7 +198,6 @@ export const onDeck = (a, l) => a >= 0 && a <= BR.end && Math.abs(l) <= BR.half;
 
 // ---------- Lots: the blocks cut up round jittered points, each a building with its own style ----------
 const rnd = seeded(1625);
-const pick = a => a[Math.floor(rnd() * a.length)];
 const TERRA = tile(facade({ wall: '#e6dcc4', frame: '#d2c6aa', glass: '#3a4450', pair: true, lintel: '#d8cdb3' }), '#cfc3a8');
 const CAST_IRON = ['#e4e0d6', '#c9c2b2', '#9aa3a8'].map(c => tile(facade({ wall: c, frame: shade(c, 8), wide: true, lintel: shade(c, -12), sill: shade(c, -12) }), '#8d877c'));
 const STYLES = {
@@ -208,8 +207,17 @@ const STYLES = {
   prewar: { tiles: [LIME, TAN, APT[2], TERRA], fl: 3.6, bay: 2.2, cornice: ['#cfc7b4'], shop: 0.35, canopy: true, setback: true },
   glass: { tiles: [GLASS], fl: 3.8, bay: 1.5, shop: 0.2, setback: true },
 };
+function makeLot(r, x, z, style, floors) {
+  const st = STYLES[style], any = a => a[Math.floor(r() * a.length)];
+  if (!floors) floors = style === 'walkup' ? 4 + Math.floor(r() * 3) : style === 'loft' ? 5 + Math.floor(r() * 6) : 8 + Math.floor(r() * 9);
+  return {
+    x, z, style, st, floors, tile: any(st.tiles), shop: r() < st.shop, tank: r() < (st.tank || 0),
+    escape: r() < (st.escape || 0), cornice: st.cornice ? any(st.cornice) : null,
+  };
+}
 const LOT = 24, LX = Math.ceil((X1 - X0) / LOT) + 1, LZ = Math.ceil((Z1 - Z0) / LOT) + 1;
 export const lots = [];
+const srnd = seeded(2501);
 for (let b = 0; b < LZ; b++) {
   for (let a = 0; a < LX; a++) {
     const x = X0 + (a + 0.15 + rnd() * 0.7) * LOT, z = Z0 + (b + 0.15 + rnd() * 0.7) * LOT;
@@ -224,13 +232,39 @@ for (let b = 0; b < LZ; b++) {
     } else {
       style = r < 0.4 ? 'walkup' : r < 0.7 ? 'midrise' : 'loft';
     }
-    if (!floors) floors = style === 'walkup' ? 4 + Math.floor(rnd() * 3) : style === 'loft' ? 5 + Math.floor(rnd() * 6) : 8 + Math.floor(rnd() * 9);
-    const st = STYLES[style];
-    lots.push({
-      x, z, style, st, floors, tile: pick(st.tiles), shop: rnd() < st.shop, tank: rnd() < (st.tank || 0),
-      escape: rnd() < (st.escape || 0), cornice: st.cornice ? pick(st.cornice) : null,
-    });
+    const L = makeLot(rnd, x, z, style, floors);
+    L.split = style === 'walkup' || style === 'loft' || (style === 'midrise' && srnd() < 0.5);
+    lots.push(L);
   }
+}
+// the low-rise lots are cut again round jittered points SUB apart, so a street is a row of narrow buildings
+// (most of Manhattan's lots are 25 ft wide), each with its own height, facade and shopfront; now and then a
+// loft among the walk-ups (or the other way round), or a two-storey row of shops
+const SUB = 8, SX = Math.ceil((X1 - X0) / SUB) + 1, SZ = Math.ceil((Z1 - Z0) / SUB) + 1;
+const subX = new Float32Array(SX * SZ), subZ = new Float32Array(SX * SZ), subOf = new Map();
+for (let k = 0; k < SX * SZ; k++) {
+  subX[k] = X0 + (k % SX + 0.2 + srnd() * 0.6) * SUB;
+  subZ[k] = Z0 + (Math.floor(k / SX) + 0.2 + srnd() * 0.6) * SUB;
+}
+const OTHER = { walkup: 'loft', loft: 'walkup', midrise: 'walkup' };
+function subLot(k, x, z) {
+  const a = Math.floor((x - X0) / SUB), b = Math.floor((z - Z0) / SUB);
+  let best = -1, bd = Infinity;
+  for (let db = -1; db <= 1; db++) {
+    for (let da = -1; da <= 1; da++) {
+      if (a + da < 0 || a + da >= SX || b + db < 0 || b + db >= SZ) continue;
+      const s = (b + db) * SX + a + da, d = (subX[s] - x) ** 2 + (subZ[s] - z) ** 2;
+      if (d < bd) { bd = d; best = s; }
+    }
+  }
+  const key = k * SX * SZ + best;
+  if (!subOf.has(key)) {
+    const P = lots[k], style = srnd() < 0.15 ? OTHER[P.style] : P.style;
+    const L = makeLot(srnd, subX[best], subZ[best], style, style === P.style ? Math.max(3, P.floors - 2 + Math.floor(srnd() * 5)) : 0);
+    if (srnd() < 0.07) Object.assign(L, { floors: 2, shop: true, tank: false, escape: false });
+    subOf.set(key, lots.push(L) - 1);
+  }
+  return subOf.get(key);
 }
 export const lotOf = new Int32Array(N).fill(-1);
 for (let c = 0; c < N; c++) {
@@ -239,14 +273,13 @@ for (let c = 0; c < N; c++) {
   let best = -1, bd = Infinity;
   for (let db = -1; db <= 1; db++) {
     for (let da = -1; da <= 1; da++) {
-      if (a + da < 0 || a + da >= LX) continue;
+      if (a + da < 0 || a + da >= LX || b + db < 0 || b + db >= LZ) continue;
       const k = (b + db) * LX + a + da, L = lots[k];
-      if (!L) continue;
       const d = (L.x - x) ** 2 + (L.z - z) ** 2;
       if (d < bd) { bd = d; best = k; }
     }
   }
-  lotOf[c] = best;
+  lotOf[c] = best >= 0 && lots[best].split ? subLot(best, x, z) : best;
 }
 
 // ---------- What every cell is ----------
@@ -503,6 +536,18 @@ function profile(f, u0, u1, pts, color) {
   const perp = { n: d => f.z0 - d, s: d => f.z1 + d, w: d => f.x0 - d, e: d => f.x1 + d }[f.side];
   B.prism(PLAIN, f.side === 'n' || f.side === 's' ? 'x' : 'z', u0, u1, pts.map(([d, y]) => [perp(d), y]), color);
 }
+// a sidewalk shed, the scaffolding that's up on half the city: a green plywood deck over the sidewalk on steel
+// posts, walked under (only the posts are solid)
+function sidewalkShed(f, u0, u1) {
+  const D = 2.4, y = CURB + 3.0, n = Math.max(1, Math.round((u1 - u0) / 2.6));
+  bx(outside(f, u0, u1, 0, D), y, y + 0.25, rgb('#2c4a36'));
+  bx(outside(f, u0, u1, D - 0.08, D), y + 0.25, y + 1.2, rgb('#30573d'));
+  for (let k = 0; k <= n; k++) {
+    const u = u0 + 0.1 + k * (u1 - u0 - 0.2) / n, r = outside(f, u - 0.06, u + 0.06, D - 0.2, D - 0.08);
+    bx(r, CURB, y, rgb('#3c4a42'));
+    solid(r.x0, r.x1, r.z0, r.z1, y);
+  }
+}
 function building(x0, x1, z0, z1, L, lotRnd) {
   const st = L.st, fl = st.fl, tw = (x1 - x0) / Math.max(1, Math.round((x1 - x0) / st.bay));
   const twz = (z1 - z0) / Math.max(1, Math.round((z1 - z0) / st.bay));
@@ -516,19 +561,22 @@ function building(x0, x1, z0, z1, L, lotRnd) {
   }
   bx(R, y, top, wall);
   solid(x0, x1, z0, z1, top);
-  if (L.cornice) bx({ x0: x0 - 0.35, x1: x1 + 0.35, z0: z0 - 0.35, z1: z1 + 0.35 }, top - 0.7, top + 0.05, rgb(L.cornice));
-  // the street fronts: awnings over the shops, a door (and a canopy) for the rest, fire escapes up the walk-ups
+  // the street fronts: the cornice along the top, a sidewalk shed now and then, awnings over the shops, a door
+  // (and a canopy) for the rest, fire escapes up the walk-ups
   for (const run of frontage(x0, x1, z0, z1)) {
     const f = { side: run.side, x0, x1, z0, z1 }, len = run.u1 - run.u0;
-    if (L.shop) {
+    if (L.cornice) bx(outside(f, run.u0 - 0.35, run.u1 + 0.35, -0.5, 0.35), top - 0.7, top + 0.05, rgb(L.cornice));
+    const shed = L.floors >= 6 && len >= 6 && lotRnd() < 0.12;
+    if (shed) sidewalkShed(f, run.u0 + 0.2, run.u1 - 0.2);
+    if (L.shop && !shed) {
       for (let u = run.u0 + 0.4; u < run.u1 - 2; u += 6.5) {
         if (lotRnd() < 0.35) continue;
         profile(f, u, Math.min(u + 4.6, run.u1 - 0.4), [[0, CURB + 3.7], [1.5, CURB + 2.95], [1.5, CURB + 2.8], [0, CURB + 3.5]], AWNINGS[Math.floor(lotRnd() * AWNINGS.length)]);
       }
-    } else if (len > 4) {
+    } else if (len > 4 && !L.shop) {
       const uc = (run.u0 + run.u1) / 2;
       bx(outside(f, uc - 1.2, uc + 1.2, 0, 0.08), CURB, CURB + 2.8, rgb(L.style === 'glass' ? '#2a3038' : '#3b2a20'));
-      if (st.canopy && len > 8) {
+      if (st.canopy && len > 8 && !shed) {
         bx(outside(f, uc - 1.4, uc + 1.4, 0, 3.3), CURB + 2.95, CURB + 3.15, rgb('#24433a'));
         for (const u of [uc - 1.3, uc + 1.3]) bx(outside(f, u - 0.04, u + 0.04, 3.17, 3.25), CURB, CURB + 2.95, rgb('#b8a66a'));
       }
@@ -570,7 +618,7 @@ function buildBlocks() {
     building(x0, x1, z0, z1, L, seeds.get(v));
     // a wooden water tank up on the roof, on its iron legs
     const h = CURB + L.floors * L.st.fl;
-    if (L.tank && !L.tower && !L.hasTank && L.x > x0 + 3 && L.x < x1 - 3 && L.z > z0 + 3 && L.z < z1 - 3) {
+    if (L.tank && !L.tower && !L.hasTank && L.x > x0 + 2 && L.x < x1 - 2 && L.z > z0 + 2 && L.z < z1 - 2) {
       L.hasTank = true;
       tanks.push({ x: L.x, y: h, z: L.z, s: 0.8 + (v % 5) * 0.1 });
     }
@@ -594,20 +642,44 @@ function buildBlocks() {
   }
 }
 
-// ---------- Along the streets: trees, lamps, hydrants, parked cars, lane lines, crosswalks, the signs ----------
+// ---------- Along the streets: trees, lamps, hydrants, parked cars, lane lines, crosswalks, signs, signals ----------
+// a traffic signal's head on the pole at (px, pz), facing (fx, fz), centred at y: red, amber and green, one lit
+function signalHead(px, pz, fx, fz, y, go) {
+  const h = Math.atan2(fz, fx), x = px + fx * 0.25, z = pz + fz * 0.25;
+  turned('#2a2c2e', x, y - 0.55, y + 0.55, z, h, 0.3, 0.4);
+  [['#ff4a3a', '#4a1c18'], ['#e8b030', '#4a3a14'], ['#4ee08a', '#173a26']].forEach(([on, off], k) => {
+    const yc = y + 0.33 - k * 0.33;
+    turned((go ? k === 2 : k === 0) ? on : off, x + fx * 0.16, yc - 0.12, yc + 0.12, z + fz * 0.16, h, 0.04, 0.24);
+  });
+}
+// the pedestrian signal under it, showing the orange hand
+function walkSignal(px, pz, fx, fz, y) {
+  const h = Math.atan2(fz, fx), x = px + fx * 0.2, z = pz + fz * 0.2;
+  turned('#2a2c2e', x, y - 0.2, y + 0.2, z, h, 0.22, 0.4);
+  turned('#ff7a1f', x + fx * 0.12, y - 0.1, y + 0.1, z + fz * 0.12, h, 0.03, 0.18);
+}
+// a green wire litter basket
+function basket(x, z) {
+  shape(CYL8, '#2e5a3c', x, CURB + 0.45, z, 0, [0.3, 0.9, 0.3]);
+  shape(CYL8, '#1e3a29', x, CURB + 0.92, z, 0, [0.32, 0.06, 0.32]);
+  around(x, z, 0.3, CURB + 0.95);
+}
 function streetFurniture() {
   const frnd = seeded(404);
   const yellow = new THREE.Color('#e3b93c'), white = new THREE.Color('#e8e6df');
-  const signed = new Set();
-  for (const way of ways) {
-    const { p, w, len } = way, r = w / 2, id = STREETS.findIndex(s => s[2] === p);
+  const free = (x, z) => !inSolid(x, CURB + 0.5, z);
+  // every street with a sidewalk, down to the Financial District's lanes (fewer trees in those)
+  STREETS.forEach(([, w, p], id) => {
+    const r = w / 2, len = [0];
+    for (let k = 2; k < p.length; k += 2) len.push(len[len.length - 1] + Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]));
+    const total = len[len.length - 1];
     for (let k = 0; k + 3 < p.length; k += 2) {
       const ax = p[k], az = p[k + 1], bx2 = p[k + 2], bz = p[k + 3], l = Math.hypot(bx2 - ax, bz - az);
       if (l < 1) continue;
       const ux = (bx2 - ax) / l, uz = (bz - az) / l, h = Math.atan2(uz, ux);
-      const s0 = len[k / 2], s1 = s0 + l;
+      const s0 = len[k / 2];
       // well clear of the corners
-      const clear = s => s > 10 && s < way.total - 10;
+      const clear = s => s > 10 && s < total - 10;
       for (const side of [1, -1]) {
         const nx = -uz * side, nz = ux * side;
         const at = (u, off) => [ax + ux * u + nx * off, az + uz * u + nz * off];
@@ -615,18 +687,18 @@ function streetFurniture() {
         for (let u = 4 + frnd() * 6; u < l - 4; u += 9 + frnd() * 5) {
           if (!clear(s0 + u)) continue;
           const [x, z] = at(u, r + 0.9);
-          if (mine(x, z, G.WALK) && frnd() < 0.8) tree(x, CURB, z, 0.8 + frnd() * 0.4);
+          if (mine(x, z, G.WALK) && frnd() < (w < 8 ? 0.3 : 0.8) && free(x, z)) tree(x, CURB, z, 0.8 + frnd() * 0.4);
         }
         for (let u = 12; u < l - 6; u += 34) {
           if (!clear(s0 + u)) continue;
           const [x, z] = at(u, r + 0.45);
-          if (!mine(x, z, G.WALK)) continue;
+          if (!mine(x, z, G.WALK) || !free(x, z)) continue;
           lamps.push({ x, y: CURB, z, ry: -Math.atan2(-nz, -nx) });
           around(x, z, 0.09, CURB + 7);
         }
         if (l > 30 && frnd() < 0.5) {
           const [x, z] = at(8, r + 0.6);
-          if (mine(x, z, G.WALK)) { hydrants.push({ x, y: CURB, z }); around(x, z, 0.18, CURB + 0.7); }
+          if (mine(x, z, G.WALK) && free(x, z)) { hydrants.push({ x, y: CURB, z }); around(x, z, 0.18, CURB + 0.7); }
         }
         // parked cars along the curb, on the wider streets (the traffic keeps to the middle of them)
         if (w >= 13) {
@@ -642,11 +714,16 @@ function streetFurniture() {
       }
       // the double yellow line down the middle of the wider streets
       if (w >= 13) {
-        const a0 = Math.max(0, 9 - s0), a1 = Math.min(l, way.total - 9 - s0);
+        const a0 = Math.max(0, 9 - s0), a1 = Math.min(l, total - 9 - s0);
         if (a1 - a0 > 1) for (const off of [-0.14, 0.14]) strip(ax + ux * a0, az + uz * a0, ax + ux * a1, az + uz * a1, 0.12, off, yellow);
       }
     }
-    // crosswalks across the ends that meet other streets, and the green signs on the corner
+  });
+  // crosswalks across the ends that meet other streets; on one corner the green signs, on a traffic signal's
+  // pole where both streets are wide enough for one, and a litter basket
+  const signed = new Set();
+  for (const way of ways) {
+    const r = way.w / 2;
     for (const e of [0, 1]) {
       if (way.links[e].length < 2) continue;
       const s = e ? way.total - 4.5 : 4.5, pt = along(way, s), ux = Math.cos(pt.h), uz = Math.sin(pt.h);
@@ -657,14 +734,17 @@ function streetFurniture() {
       if (!other || !way.name || signed.has(key)) continue;
       const o = along(other.way, other.dir > 0 ? 3 : other.way.total - 3);
       const vx = Math.cos(o.h), vz = Math.sin(o.h);
+      // which way each street runs off from the corner
+      const ow = e ? -1 : 1, ov = other.dir > 0 ? 1 : -1;
       for (const [sa, sb] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
         const px = node[0] + (-uz * sa) * (r + 0.7) + (-vz * sb) * (other.way.w / 2 + 0.7);
         const pz = node[1] + (ux * sa) * (r + 0.7) + (vx * sb) * (other.way.w / 2 + 0.7);
         const c = cellAt(px, pz);
         if (c < 0 || ground[c] !== G.WALK) continue;
         signed.add(key);
-        B.box(px - 0.06, px + 0.06, CURB, CURB + 3.6, pz - 0.06, pz + 0.06, rgb('#2c3a30'));
-        around(px, pz, 0.08, CURB + 3.6);
+        const lights = way.w >= 9 && other.way.w >= 9, top = lights ? CURB + 5.3 : CURB + 3.6;
+        B.box(px - 0.06, px + 0.06, CURB, top, pz - 0.06, pz + 0.06, rgb('#2c3a30'));
+        around(px, pz, 0.08, top);
         const plate = (name, hh, y) => {
           Q.setFromAxisAngle(V.set(0, 1, 0), -hh);
           const off = 0.74;
@@ -672,6 +752,81 @@ function streetFurniture() {
         };
         plate(way.name, pt.h, CURB + 3.37);
         plate(other.way.name, o.h, CURB + 3.07);
+        if (lights) {
+          signalHead(px, pz, ux * ow, uz * ow, CURB + 4.6, false);
+          signalHead(px, pz, vx * ov, vz * ov, CURB + 4.6, true);
+          walkSignal(px, pz, uz * sa, -ux * sa, CURB + 2.5);
+        }
+        const lx = px + ux * ow * 1.4, lz = pz + uz * ow * 1.4, lc = cellAt(lx, lz);
+        if (lc >= 0 && ground[lc] === G.WALK && free(lx, lz)) basket(lx, lz);
+        break;
+      }
+    }
+  }
+}
+
+// ---------- Subway entrances, at the real stations' corners ----------
+// [the street the entrance is on, the cross street]: a railed stair down off the sidewalk, the green globes
+// either side of the top of it
+const STATIONS = [
+  ['Broadway', 'Wall Street'], ['William Street', 'Wall Street'], ['Broad Street', 'Wall Street'],
+  ['Trinity Place', 'Rector Street'], ['Greenwich Street', 'Rector Street'], ['Broadway', 'Fulton Street'],
+  ['William Street', 'Fulton Street'], ['Nassau Street', 'Fulton Street'], ['Church Street', 'Cortlandt Street'],
+  ['Greenwich Street', 'Cortlandt Way'], ['Broadway', 'Murray Street'], ['Church Street', 'Park Place'],
+  ['Church Street', 'Chambers Street'], ['West Broadway', 'Chambers Street'], ['Varick Street', 'Franklin Street'],
+];
+const BALL = new THREE.SphereGeometry(1, 10, 8);
+const subwayStops = [];
+function subways() {
+  const green = '#2a5a3a';
+  for (const [a, b] of STATIONS) {
+    // where they meet: the nearest pair of their points
+    let best = null, bd = 5;
+    for (const [na, wa, pa] of STREETS) {
+      if (na !== a) continue;
+      for (const [nb, wb, pb] of STREETS) {
+        if (nb !== b) continue;
+        for (let i = 0; i < pa.length; i += 2) {
+          for (let j = 0; j < pb.length; j += 2) {
+            const d = Math.hypot(pa[i] - pb[j], pa[i + 1] - pb[j + 1]);
+            if (d < bd) { bd = d; best = { p: pa, i, r: wa / 2, rb: wb / 2 }; }
+          }
+        }
+      }
+    }
+    if (!best) continue;
+    // along street a from the corner, whichever way and side has room on the sidewalk (or further along)
+    const { p, i, r, rb } = best, O0 = r + 1.2, O1 = r + 2.9;
+    let done = false;
+    for (const [j, U0] of [[i + 2, rb + 4.5], [i - 2, rb + 4.5], [i + 2, rb + 12], [i - 2, rb + 12]]) {
+      const U1 = U0 + 4.5;
+      if (done || j < 0 || j >= p.length) continue;
+      const l = Math.hypot(p[j] - p[i], p[j + 1] - p[i + 1]);
+      if (l < 1) continue;
+      const ux = (p[j] - p[i]) / l, uz = (p[j + 1] - p[i + 1]) / l, h = Math.atan2(uz, ux);
+      for (const side of [1, -1]) {
+        const nx = -uz * side, nz = ux * side;
+        const at = (u, off) => [p[i] + ux * u + nx * off, p[i + 1] + uz * u + nz * off];
+        let ok = true;
+        for (let u = U0; u <= U1 + 0.01 && ok; u += 0.75) {
+          for (let o = O0; o <= O1 + 0.01 && ok; o += 0.4) {
+            const [x, z] = at(u, o), c = cellAt(x, z);
+            ok = c >= 0 && ground[c] !== G.ROAD && ground[c] !== G.RIVER && ground[c] !== G.POOL && !inSolid(x, CURB + 0.5, z);
+          }
+        }
+        if (!ok) continue;
+        const um = (U0 + U1) / 2, om = (O0 + O1) / 2, [cx0, cz0] = at(um, om);
+        turned('#151618', cx0, CURB, CURB + 0.03, cz0, h, U1 - U0, O1 - O0);
+        for (const off of [O0, O1]) { const [x, z] = at(um, off); turned(green, x, CURB, CURB + 1.0, z, h, U1 - U0, 0.08); }
+        { const [x, z] = at(U1, om); turned(green, x, CURB, CURB + 1.0, z, h, 0.08, O1 - O0); }
+        for (const off of [O0, O1]) {
+          const [x, z] = at(U0, off);
+          turned(green, x, CURB, CURB + 2.6, z, h, 0.1, 0.1);
+          shape(BALL, '#5fd27a', x, CURB + 2.78, z, 0, 0.26);
+        }
+        for (let u = U0; u <= U1 + 0.01; u += 0.9) for (let off = O0; off <= O1 + 0.01; off += 0.85) { const [x, z] = at(u, off); around(x, z, 0.45, CURB + 1.0); }
+        subwayStops.push({ name: `${a} & ${b}`, x: cx0, z: cz0 });
+        done = true;
         break;
       }
     }
@@ -987,10 +1142,11 @@ export function buildManhattan(parent) {
   const rr = seeded(1776);
   buildGround();
   buildBlocks();
-  streetFurniture();
   parks();
   trinity(rr); stPauls(rr); federalHall(); nyse(); cityHall(); woolworth(); oneWtc(); memorial(rr); oculus();
   castleClinton(); chargingBull();
+  subways();
+  streetFurniture();
   brooklynBridge(parent);
   B.finish(parent);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000).rotateX(-Math.PI / 2),
@@ -1098,6 +1254,11 @@ export function drawMiniMap() {
     let sx = 0, sz = 0;
     for (let k = 0; k < p.length; k += 2) { sx += p[k]; sz += p[k + 1]; }
     g.fillText(name, ...at(sx / (p.length / 2), sz / (p.length / 2)));
+  }
+  // the subway entrances
+  for (const s of subwayStops) {
+    g.fillStyle = '#2a5a3a'; g.beginPath(); g.arc(...at(s.x, s.z), 3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.font = '700 4px system-ui, sans-serif'; g.fillText('M', ...at(s.x, s.z));
   }
   g.fillStyle = '#8a5a2b'; g.font = '700 8px system-ui, sans-serif';
   for (const [name, [x, z]] of Object.entries(SPOTS)) if (!name.includes('&') && !PARKS.some(([n]) => n === name)) g.fillText(name, ...at(x, z));

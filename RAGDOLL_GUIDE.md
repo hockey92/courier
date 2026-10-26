@@ -863,10 +863,19 @@ real (OpenStreetMap); the buildings are made up.
   isn't a block with streets on all four sides, or a park, and reaches the map's edge). The blocks are cut
   into lots round jittered points 24 m apart, each with a style: walk-ups (shops, fire escapes, water tanks),
   Tribeca's lofts, midrise apartments, prewar offices with setbacks and glass towers (thickest in the
-  Financial District, from Chambers St south). Each lot's runs of cells become boxes with a shopfront band,
-  awnings and doors (or a door and canopy) wherever they face a sidewalk, and a cornice. The streets'
-  asphalt and raised sidewalks are drawn along the streets' own lines (so the curbs are smooth at any angle),
-  with trees, lamps, hydrants, parked cars, double yellow lines, crosswalks and street signs at the corners.
+  Financial District, from Chambers St south). The low-rise lots (walk-ups, lofts, half the midrises) are cut
+  again round points `SUB` = 8 m apart, so a street is a row of narrow buildings as it is on the real 25 ft
+  lots: each within two floors of its block, with its own facade, shopfront, tank and fire escape, now and
+  then a loft among walk-ups or a two-storey row of shops. Each lot's runs of cells become boxes with a
+  shopfront band, awnings and doors (or a door and canopy) and a cornice wherever they face a sidewalk, and
+  now and then a green sidewalk shed over it (only its posts are solid). The streets' asphalt and raised
+  sidewalks are drawn along the streets' own lines (so the curbs are smooth at any angle). Every street
+  with a sidewalk gets trees (fewer on the lanes under 8 m), lamps and hydrants; the wider ones parked cars
+  and double yellow lines; the ends where streets meet crosswalks, and one corner the street signs and a
+  litter basket, the signs on a traffic signal's pole (red one way, green the other, the orange hand for
+  walkers) where both streets are 9 m or more. `STATIONS` puts subway entrances (a railed stairwell, a green
+  globe either side) on the sidewalk by the real stations' corners, wherever there's room; the minimap marks
+  them.
   Landmarks take over their cells: Trinity Church and St. Paul's Chapel in their churchyards, Federal Hall,
   the Stock Exchange (flag and all), City Hall and its fountain, the Woolworth Building, One World Trade
   Center, the memorial's pools and oaks, the Oculus, Castle Clinton, the Charging Bull. The Brooklyn Bridge
