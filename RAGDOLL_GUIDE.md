@@ -829,7 +829,8 @@ the game's hero (`actors.man`), gangsters, weapons and bottles, in a run from tu
   speed (back wheel and cranks locked, skid marks, `music.skid()`), then held at a stop until released, and
   from a stop it rides backwards. **A/D** steer and lean into the turn; stopped, he track stands. **Space**
   bunny hops (~0.5 m, onto benches), **H** rings `music.bell()`. Collision is five probe points against
-  anything taller than `CLIMB`; hitting something at over 0.14 m/frame throws him over the bars (`knockOut`
+  anything taller than `CLIMB`, checked when it turns as well as when it rolls; only probes that aren't in
+  something already count, so a bike wedged into a wall can ride out of it. Hitting something at over 0.14 m/frame throws him over the bars (`knockOut`
   carrying the bike's speed, no heart lost). Gangsters in front of the wheel at over 0.1 are run over
   (`hitByCar`), and any hit that lands on him (`stun`) knocks him off.
 - Controls as on Montague St, except that he always runs at the game's pace and **Shift** sprints (2.2×,
@@ -868,7 +869,10 @@ real (OpenStreetMap); the buildings are made up.
   lots: each within two floors of its block, with its own facade, shopfront, tank and fire escape, now and
   then a loft among walk-ups or a two-storey row of shops. Each lot's runs of cells become boxes with a
   shopfront band, awnings and doors (or a door and canopy) and a cornice wherever they face a sidewalk, and
-  now and then a green sidewalk shed over it (only its posts are solid). The streets' asphalt and raised
+  now and then a green sidewalk shed over it (only its posts are solid). The shopfronts are split into shops
+  about 5.5 m wide, each with a name board over its door (and over its awning, if it has one), picked by where
+  it stands from the 64 in `streetkit.js`'s sign atlas (`SIGN_MAT`, `signUV`: one texture, so all ~5,400
+  signs share a material; lit a little for zombie night). The streets' asphalt and raised
   sidewalks are drawn along the streets' own lines (so the curbs are smooth at any angle). Every street
   with a sidewalk gets trees (fewer on the lanes under 8 m), lamps and hydrants; the wider ones parked cars
   and double yellow lines; the ends where streets meet crosswalks, and one corner the street signs and a
@@ -886,8 +890,12 @@ real (OpenStreetMap); the buildings are made up.
 - **`manhattan.js`** is the page, laid out like `heights.js`: the run over ten turfs (Bowling Green, Wall St,
   City Hall Park, the 9/11 Memorial, Stone St, Zuccotti Park, the Battery, South Street Seaport, Trinity
   Church, Tribeca), zombie night, the minimap, eight bikes, people on the sidewalks, and traffic: yellow
-  cabs, NYPD cars (light bars flashing), USPS vans and private cars on the street network, in the
+  cabs, NYPD cars (light bars flashing), USPS vans and private cars (350 in all) on the street network, in the
   right-hand lane, queueing and stopping for anyone in front; any of them (or a parked car) can be taken.
+  Both keep up with him: the 220 people walk `sidewalkPaths()` (every street's sidewalk, cut where it stops)
+  within `NEAR` = 140 m, and anyone left behind turns up on another sidewalk round him; a vehicle over `FAR` =
+  260 m away turns up on a street between `SEEN` = 100 m and 240 m from him (four a step). Jumping somewhere
+  (1–8, the map) reshuffles them all round the new spot.
   **1–8** places (Wall St & Broadway, the 9/11 Memorial, Bowling Green, City Hall, Stone St, the Brooklyn
   Bridge, the Battery, South Street Seaport). Walking out to the bridge's Manhattan tower loads
   `heights.html?from=manhattan`. Bests: `ragdollBestTurfsManhattan`, `ragdollBestManhattanWave`.

@@ -9,7 +9,7 @@ import { BODY_R, seeded } from './config.js';
 import { Batch, colorMat, instanced } from './batch.js';
 import {
   APT, AWNINGS, BRICK, BROWN, CAR_COLORS, FLAT, GLASS, GOTHIC_BROWN, GREENS, LIME, MARBLE, PAINT, PLAIN, ROOF,
-  SHOPS, TAN, WAREHOUSE, buildProps, facade, rgb, shade, signMat, tile,
+  SHOPS_BARE, SIGN_COUNT, SIGN_MAT, TAN, WAREHOUSE, buildProps, facade, rgb, shade, signMat, signUV, tile,
 } from './streetkit.js';
 import { PARKS, POOLS, SPOTS, STREETS } from './manhattanmap.js';
 
@@ -548,6 +548,20 @@ function sidewalkShed(f, u0, u1) {
     solid(r.x0, r.x1, r.z0, r.z1, y);
   }
 }
+// a shop's name board on the wall from y0 up, over u0…u1 of a side (above its awning, if it has one); which
+// shop it is goes by where it stands
+function shopSign(f, u0, u1, y0) {
+  const w = Math.min(u1 - u0, 4.4), h = Math.max(0.32, Math.min(0.55, w / 8)), uc = (u0 + u1) / 2, y1 = y0 + h;
+  bx(outside(f, uc - w / 2 - 0.05, uc + w / 2 + 0.05, 0, 0.1), y0 - 0.05, y1 + 0.05, rgb('#1b1b1d'));
+  const at = (u, d) => ({ n: [u, f.z0 - d], s: [u, f.z1 + d], w: [f.x0 - d, u], e: [f.x1 + d, u] })[f.side];
+  // facing the wall, the viewer's right is (nz, -nx) for the side's outward normal n
+  const [nx, nz] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[f.side];
+  let a = at(uc - w / 2, 0.102), b = at(uc + w / 2, 0.102);
+  if ((b[0] - a[0]) * nz - (b[1] - a[1]) * nx < 0) [a, b] = [b, a];
+  const [s0, t0, s1, t1] = signUV(Math.abs(Math.floor(uc * 7.3 + f.x0 * 3.1 + f.z0 * 5.7)) % SIGN_COUNT), back = at(uc, -1);
+  B.facing(SIGN_MAT, [[a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]]], [back[0], (y0 + y1) / 2, back[1]],
+    [[s0, t0], [s1, t0], [s1, t1], [s0, t1]]);
+}
 function building(x0, x1, z0, z1, L, lotRnd) {
   const st = L.st, fl = st.fl, tw = (x1 - x0) / Math.max(1, Math.round((x1 - x0) / st.bay));
   const twz = (z1 - z0) / Math.max(1, Math.round((z1 - z0) / st.bay));
@@ -556,7 +570,7 @@ function building(x0, x1, z0, z1, L, lotRnd) {
   const top = L.tower ? CURB + L.podium : CURB + L.floors * fl;
   const wall = { mat: L.tile, top: ROOF, tw: Math.min(tw, twz) || st.bay, th: fl };
   if (L.shop) {
-    bx(R, y, y + 4.2, { mat: SHOPS[(L.x * 7 + L.z * 3 & 0xffff) % SHOPS.length], tw: 3, th: 4.2 });
+    bx(R, y, y + 4.2, { mat: SHOPS_BARE[(L.x * 7 + L.z * 3 & 0xffff) % SHOPS_BARE.length], tw: 3, th: 4.2 });
     y += 4.2;
   }
   bx(R, y, top, wall);
@@ -569,9 +583,12 @@ function building(x0, x1, z0, z1, L, lotRnd) {
     const shed = L.floors >= 6 && len >= 6 && lotRnd() < 0.12;
     if (shed) sidewalkShed(f, run.u0 + 0.2, run.u1 - 0.2);
     if (L.shop && !shed) {
-      for (let u = run.u0 + 0.4; u < run.u1 - 2; u += 6.5) {
-        if (lotRnd() < 0.35) continue;
-        profile(f, u, Math.min(u + 4.6, run.u1 - 0.4), [[0, CURB + 3.7], [1.5, CURB + 2.95], [1.5, CURB + 2.8], [0, CURB + 3.5]], AWNINGS[Math.floor(lotRnd() * AWNINGS.length)]);
+      // a shop every 5.5 m or so, spread evenly along the run, each awning and sign in the middle of its stretch
+      const n = Math.max(1, Math.round(len / 5.5)), step = len / n, w = Math.min(4.6, step - 0.8);
+      for (let k = 0; k < n; k++) {
+        const u = run.u0 + k * step + (step - w) / 2, u1 = u + w, awning = lotRnd() >= 0.35;
+        if (awning) profile(f, u, u1, [[0, CURB + 3.7], [1.5, CURB + 2.95], [1.5, CURB + 2.8], [0, CURB + 3.5]], AWNINGS[Math.floor(lotRnd() * AWNINGS.length)]);
+        shopSign(f, u, u1, awning ? CURB + 3.74 : CURB + 3.3);
       }
     } else if (len > 4 && !L.shop) {
       const uc = (run.u0 + run.u1) / 2;
@@ -1196,17 +1213,28 @@ export function spotNear(x, z) {
   return null;
 }
 // the sidewalks people walk along: [x0, z0, x1, z1] down the middle of each sidewalk beside a long enough piece of street
-export function sidewalkPaths(rnd2) {
+// the stretches down the middle of each side's sidewalk, on every street (not just the ones cars use), that are
+// sidewalk all the way and 6 m or longer: [x0, z0, x1, z1]
+export function sidewalkPaths() {
   const out = [];
-  for (const way of ways) {
-    const { p, w } = way, id = STREETS.findIndex(s => s[2] === p);
+  for (const [, w, p] of STREETS) {
     for (let k = 0; k + 3 < p.length; k += 2) {
-      const ax = p[k], az = p[k + 1], bx2 = p[k + 2], bz = p[k + 3], l = Math.hypot(bx2 - ax, bz - az);
-      if (l < 30 || rnd2() > 0.45) continue;
-      const ux = (bx2 - ax) / l, uz = (bz - az) / l, side = rnd2() < 0.5 ? 1 : -1, off = w / 2 + 1.75;
-      const a = [ax + ux * 4 - uz * side * off, az + uz * 4 + ux * side * off], b = [bx2 - ux * 4 - uz * side * off, bz - uz * 4 + ux * side * off];
-      const ok = q => { const c = cellAt(q[0], q[1]); return c >= 0 && ground[c] === G.WALK && owner[c] === id; };
-      if (ok(a) && ok(b)) out.push([...a, ...b]);
+      const ax = p[k], az = p[k + 1], l = Math.hypot(p[k + 2] - ax, p[k + 3] - az);
+      if (l < 6) continue;
+      const ux = (p[k + 2] - ax) / l, uz = (p[k + 3] - az) / l, off = w / 2 + WALK / 2;
+      for (const side of [1, -1]) {
+        const ox = ax - uz * side * off, oz = az + ux * side * off;
+        let from = -1;
+        for (let s = 0; s <= l; s += 1) {
+          const c = cellAt(ox + ux * s, oz + uz * s), walk = c >= 0 && ground[c] === G.WALK;
+          if (walk && from < 0) from = s;
+          if (from >= 0 && (!walk || s + 1 > l)) {
+            const to = walk ? s : s - 1;
+            if (to - from >= 6) out.push([ox + ux * from, oz + uz * from, ox + ux * to, oz + uz * to]);
+            from = -1;
+          }
+        }
+      }
     }
   }
   return out;

@@ -162,25 +162,28 @@ export function createBikes({ parent, racks, place }) {
     lastMark = [x, y, z];
   }
 
-  // would the bike at (x, z) be inside something it can't ride up onto?
+  // which of the probes would be inside something it can't ride up onto with the bike at (x, z), one bit each
   function blocked(b, x, z) {
     const ch = Math.cos(b.heading), sh = Math.sin(b.heading);
-    for (const [u, l] of PROBES) {
+    let hit = 0;
+    PROBES.forEach(([u, l], i) => {
       const px = x + ch * u - sh * l, pz = z + sh * u + ch * l;
       for (const o of boxesNear(px, 0.05, pz)) {
         if (o.top <= b.y + CLIMB) continue;
         if (o.bottom !== undefined && b.y + 1.8 <= o.bottom) continue;
-        if (px > o.x0 && px < o.x1 && pz > o.z0 && pz < o.z1) return true;
+        if (px > o.x0 && px < o.x1 && pz > o.z0 && pz < o.z1) { hit |= 1 << i; break; }
       }
-    }
-    return false;
+    });
+    return hit;
   }
-  // rolls it along by its speed in short steps; true if it ran into something
+  // rolls it along by its speed in short steps; true if it ran into something. Only probes that aren't in
+  // anything yet count, so a bike wedged into a wall can still ride out of it
   function roll(b) {
     const n = Math.ceil(Math.abs(b.speed) / 0.12) || 1, ch = Math.cos(b.heading), sh = Math.sin(b.heading);
+    const stuck = blocked(b, b.x, b.z);
     for (let k = 0; k < n; k++) {
       const nx = b.x + ch * b.speed / n, nz = b.z + sh * b.speed / n;
-      if (blocked(b, nx, nz)) return true;
+      if (blocked(b, nx, nz) & ~stuck) return true;
       b.x = nx; b.z = nz;
     }
     return false;
@@ -298,8 +301,11 @@ export function createBikes({ parent, racks, place }) {
       else if (pedal < 0 && !b.braking) b.speed = Math.max(-0.06, b.speed - 0.003);
       else { b.speed *= 0.994; if (Math.abs(b.speed) < 0.002) b.speed = 0; }
     }
-    // tight at walking pace, wide at full tilt; a skid swings the back end round a bit more
+    // tight at walking pace, wide at full tilt; a skid swings the back end round a bit more. It won't turn
+    // the back wheel or the bars into a wall
+    const h0 = b.heading, stuck = blocked(b, b.x, b.z);
     b.heading += steer * 0.055 * Math.min(1, v / 0.03) / (1 + v * 5) * Math.sign(b.speed || 1) * (b.skidding ? 1.4 : 1);
+    if (blocked(b, b.x, b.z) & ~stuck) b.heading = h0;
     if (hop && !b.air && b.vy === 0) { b.vy = 0.085; b.air = true; dust(b.x, b.y, b.z, 5); music.whoosh(); }
     const ch = Math.cos(b.heading), sh = Math.sin(b.heading);
     if (roll(b)) {

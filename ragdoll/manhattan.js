@@ -197,13 +197,13 @@ const cruiser = (paint, stripe, roof) => [
   [-2.52, -2.48, 0.82, 1, -0.85, -0.55, '#c0202a'], [-2.52, -2.48, 0.82, 1, 0.55, 0.85, '#c0202a'],
   ...WHEELS(1.55, 0.88),
 ];
-const NYPD = { len: 5, wid: 2, top: 1.8, speed: 0.2, n: 22, geo: model(cruiser('#f4f4f2', '#1d4aa0', '#f4f4f2')) };
+const NYPD = { len: 5, wid: 2, top: 1.8, speed: 0.2, n: 50, geo: model(cruiser('#f4f4f2', '#1d4aa0', '#f4f4f2')) };
 const TAXI = {
-  len: 5, wid: 2, top: 1.8, speed: 0.22, n: 44,
+  len: 5, wid: 2, top: 1.8, speed: 0.22, n: 140,
   geo: model([...cruiser('#f2c230', '#1c1c1e', '#f2c230'), [-0.55, 0.15, 1.8, 2.1, -0.5, 0.5, '#f4f4f2']]),   // the roof light
 };
 const USPS = {
-  len: 5.6, wid: 2.1, top: 2.6, speed: 0.16, n: 16,
+  len: 5.6, wid: 2.1, top: 2.6, speed: 0.16, n: 40,
   geo: model([
     [-2.8, 2.2, 0.35, 2.6, -1.05, 1.05, '#f2f2ee'],             // the box
     [2.2, 2.8, 0.35, 1.3, -1, 1, '#f2f2ee'],                    // the hood
@@ -217,18 +217,18 @@ const USPS = {
     ...WHEELS(1.7, 0.92),
   ]),
 };
-const SEDAN = { len: 4.4, wid: 1.8, top: 1.6, speed: 0.19, n: 30, geo: carGeo, colored: true };
+const SEDAN = { len: 4.4, wid: 1.8, top: 1.6, speed: 0.19, n: 120, geo: carGeo, colored: true };
 const TYPES = [TAXI, NYPD, USPS, SEDAN];
 const red = new THREE.MeshStandardMaterial({ color: '#ff3030', emissive: '#ff0000' });
 const blue = new THREE.MeshStandardMaterial({ color: '#3060ff', emissive: '#0030ff' });
 const barGeo = z => new THREE.BoxGeometry(0.34, 0.14, 0.7).translate(-0.3, 1.87, z);
 const fleet = [];
 const rand = Math.random;
-// a few of each start out round Wall St, where he does
+// a quarter of each start out round Wall St, where he does
 const roomy = ways.filter(w => w.total > 60), downtown = roomy.filter(w => Math.hypot(w.p[0], w.p[1]) < 220);
 for (const type of TYPES) {
   for (let k = 0; k < type.n; k++) {
-    const pool = k < 4 ? downtown : roomy, way = pool[Math.floor(rand() * pool.length)];
+    const pool = k < type.n / 4 ? downtown : roomy, way = pool[Math.floor(rand() * pool.length)];
     const v = {
       type, way, s: rand() * way.total, dir: rand() < 0.5 ? 1 : -1, v: 0, x: 0, z: 0, h: 0, taken: false,
       color: type.colored ? CAR_COLORS[Math.floor(rand() * CAR_COLORS.length)] : null,
@@ -258,7 +258,28 @@ function placeVehicle(v) {
   Object.assign(v.box, { x0: v.x - c * L - sn * W, x1: v.x + c * L + sn * W, z0: v.z - sn * L - c * W, z1: v.z + sn * L + c * W });
 }
 fleet.forEach(placeVehicle);
+// the traffic keeps up with him too: anything left FAR metres behind turns up again on a street round him, out
+// past SEEN metres where it's hard to spot it, a few a step; when he jumps somewhere they all do
+const FAR = 260, SEEN = 100, SLOTS = [];
+for (const way of ways) for (let s = Math.min(10, way.total / 2); s < way.total; s += 16) { along(way, s, spot); SLOTS.push({ way, s, x: spot.x, z: spot.z }); }
+let trafficAt = null;
+function keepTrafficNear() {
+  const jumped = trafficAt && Math.hypot(hero.x - trafficAt[0], hero.z - trafficAt[1]) > 30;
+  trafficAt = [hero.x, hero.z];
+  let near = null, moved = 0;
+  for (const v of fleet) {
+    if (v.taken || (!jumped && moved >= 4) || (!jumped && Math.hypot(v.x - hero.x, v.z - hero.z) < FAR)) continue;
+    near ??= SLOTS.filter(q => { const d = Math.hypot(q.x - hero.x, q.z - hero.z); return d < FAR - 20 && d > (jumped ? 25 : SEEN); });
+    if (!near.length) return;
+    const q = near[Math.floor(rand() * near.length)];
+    if (fleet.some(o => o !== v && !o.taken && Math.hypot(o.x - q.x, o.z - q.z) < 9)) continue;
+    Object.assign(v, { way: q.way, s: q.s, dir: rand() < 0.5 ? 1 : -1, v: 0 });
+    placeVehicle(v);
+    moved++;
+  }
+}
 function driveTraffic() {
+  keepTrafficNear();
   const people = [hero, ...gangsters, ...cars.mine, ...bikes.bikes];
   for (const v of fleet) {
     if (v.taken) continue;   // he's driving it now (heightscars.js)
@@ -351,16 +372,46 @@ const LEGS = ['#2a2c30', '#262a33', '#3a3a3a', '#41444a', '#55606e', '#6b5a48'];
 const SKIN_TONES = ['#c99a7a', '#d9ad8c', '#8a5f45', '#6e4a36', '#e0b896', '#a87454'];
 const HAIR = ['#2a201a', '#4a3320', '#8a6a3a', '#111', '#9a9590'];
 const pick = a => a[Math.floor(Math.random() * a.length)];
-// each walks up and down a sidewalk: [x0, z0, x1, z1]
-const walkers = sidewalkPaths(Math.random).slice(0, 170).map(([x0, z0, x1, z1]) => ({
-  ...buildPerson(pick(TOPS), pick(LEGS), pick(SKIN_TONES), pick(HAIR)),
-  x0, z0, dx: x1 - x0, dz: z1 - z0, len: Math.hypot(x1 - x0, z1 - z0), t: Math.random(), dir: Math.random() < 0.5 ? 1 : -1, speed: 1 + Math.random() * 0.5,
-}));
+// a crowd that keeps up with him: CROWD people, each walking up and down a sidewalk ([x0, z0, x1, z1]) within
+// NEAR metres of him, a little to one side or the other so they pass each other. Anyone left further behind
+// turns up on another sidewalk round him, out of arm's reach; when he jumps somewhere (1–8, the map) they all do
+const PATHS = sidewalkPaths().map(([x0, z0, x1, z1]) => ({ x0, z0, x1, z1, len: Math.hypot(x1 - x0, z1 - z0) }));
+const CROWD = 220, NEAR = 140;
+function pathsNear() {
+  const list = PATHS.filter(p => Math.hypot((p.x0 + p.x1) / 2 - hero.x, (p.z0 + p.z1) / 2 - hero.z) < NEAR);
+  list.total = list.reduce((a, p) => a + p.len, 0);
+  return list;
+}
+// somewhere along the sidewalks in pool, every metre of them as likely as any other
+function putOnSidewalk(w, pool, minD) {
+  for (let k = 0; k < 8; k++) {
+    let r = Math.random() * pool.total, i = 0;
+    while (i < pool.length - 1 && r > pool[i].len) r -= pool[i++].len;
+    const { x0, z0, x1, z1, len } = pool[i], dx = x1 - x0, dz = z1 - z0, o = (Math.random() - 0.5) * 1.4;
+    Object.assign(w, { x0: x0 - dz / len * o, z0: z0 + dx / len * o, dx, dz, len, t: Math.random(), dir: Math.random() < 0.5 ? 1 : -1 });
+    if (Math.hypot(w.x0 + dx * w.t - hero.x, w.z0 + dz * w.t - hero.z) >= minD) return;
+  }
+}
+const startPaths = pathsNear().length ? pathsNear() : Object.assign([...PATHS], { total: PATHS.reduce((a, p) => a + p.len, 0) });
+const walkers = Array.from({ length: CROWD }, () => {
+  const w = { ...buildPerson(pick(TOPS), pick(LEGS), pick(SKIN_TONES), pick(HAIR)), speed: 1 + Math.random() * 0.5 };
+  putOnSidewalk(w, startPaths, 0);
+  return w;
+});
+let crowdAt = null;   // where he was last frame
 function renderWalkers(dt, t) {
+  const jumped = crowdAt && Math.hypot(hero.x - crowdAt[0], hero.z - crowdAt[1]) > 30;
+  crowdAt = [hero.x, hero.z];
+  let near = null;
   for (const w of walkers) {
     w.t += w.dir * w.speed * dt / w.len;
     if (w.t > 1) { w.t = 1; w.dir = -1; } else if (w.t < 0) { w.t = 0; w.dir = 1; }
-    const x = w.x0 + w.dx * w.t, z = w.z0 + w.dz * w.t, far = Math.hypot(x - hero.x, z - hero.z) > 160;
+    let x = w.x0 + w.dx * w.t, z = w.z0 + w.dz * w.t;
+    if (jumped || Math.hypot(x - hero.x, z - hero.z) > NEAR + 15) {
+      near ??= pathsNear();
+      if (near.length) { putOnSidewalk(w, near, jumped ? 6 : 40); x = w.x0 + w.dx * w.t; z = w.z0 + w.dz * w.t; }
+    }
+    const far = Math.hypot(x - hero.x, z - hero.z) > NEAR + 15;
     w.p.visible = !far;
     if (far) continue;
     const s = t * w.speed * 3.2 + w.phase;

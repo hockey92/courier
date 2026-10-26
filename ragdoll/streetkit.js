@@ -67,14 +67,16 @@ export const gothic = (wall, glassC) => tile((g, n) => {
   g.fillStyle = shade(wall, -14); g.fillRect(62, 30, 4, 86); g.fillRect(40, 76, 48, 3);
 });
 export const GOTHIC_BROWN = gothic('#6f4a3a', '#2c3a5c'), GOTHIC_BRICK = gothic('#8e4a36', '#2f3d55');
-export const SHOPS = ['#7a2b2b', '#1f4a6e', '#2f5d3a', '#1e1e22'].map(band => tile((g, n) => {
+const shopTiles = lettering => ['#7a2b2b', '#1f4a6e', '#2f5d3a', '#1e1e22'].map(band => tile((g, n) => {
   g.fillStyle = '#3a3330'; g.fillRect(0, 0, n, n);
   g.fillStyle = band; g.fillRect(0, 6, n, 22);
-  g.fillStyle = '#e8e2d0'; for (let x = 16; x < 112; x += 14) g.fillRect(x, 14, 8, 6);   // lettering
+  if (lettering) { g.fillStyle = '#e8e2d0'; for (let x = 16; x < 112; x += 14) g.fillRect(x, 14, 8, 6); }
   g.fillStyle = '#56636e'; g.fillRect(10, 36, 108, 92);
   g.fillStyle = '#8a98a3'; g.fillRect(10, 36, 108, 8);
   g.fillStyle = '#2b2f33'; g.fillRect(62, 36, 4, 92);
 }));
+// shopfronts with made-up lettering on the band, and bare ones for the maps that hang SIGN_MAT signs on them
+export const SHOPS = shopTiles(true), SHOPS_BARE = shopTiles(false);
 export const AWNINGS = ['#8c2c2c', '#2c4c7c', '#2d6a3e', '#c9a227', '#3b3b3f', '#a0522d'];
 export const GREENS = ['#4f7a35', '#5d8a3c', '#476d30', '#6b9446', '#557f3a'];
 // far versions of the office tiles, which skip the shadow pass
@@ -92,6 +94,47 @@ export function signMat(name) {
     signMats.set(name, new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }));
   }
   return signMats.get(name);
+}
+// shop signs: every name painted once into one atlas (SIGN_COLS × SIGN_ROWS cells of 512 × 64), so they all
+// share SIGN_MAT; signUV(i) is sign i's cell
+const SHOP_NAMES = [
+  'DELI & GROCERY', 'PIZZA', "TONY'S PIZZA", 'BAGELS', 'COFFEE SHOP', 'NAIL SALON', 'DRY CLEANERS', 'LAUNDROMAT',
+  'PHARMACY', 'HARDWARE', 'WINE & LIQUOR', 'CHECK CASHING', 'SHOE REPAIR', 'BARBER SHOP', 'HALAL GYRO', 'CHINESE FOOD',
+  'DIM SUM', 'SUSHI', 'TACOS', 'THAI KITCHEN', 'RAMEN', 'DINER', 'BAKERY', 'FLORIST',
+  'BOOKS', 'CELL PHONES', 'OPTICIAN', 'TAILOR', 'JEWELRY', 'LOCKSMITH', 'SMOKE SHOP', 'PET SUPPLY',
+  'BEAUTY SUPPLY', 'NEWSSTAND', 'BURGERS', 'FRIED CHICKEN', 'JUICE BAR', 'ICE CREAM', 'DONUTS', 'STEAKHOUSE',
+  'TRATTORIA', 'BBQ', 'NOODLES', 'DUMPLINGS', 'FALAFEL', 'SALAD BAR', 'WINE BAR', "O'BRIEN'S PUB",
+  'GYM', 'YOGA', 'DENTIST', 'REAL ESTATE', 'TRAVEL', 'SAVINGS BANK', 'POST & SHIP', 'COPY & PRINT',
+  'ELECTRONICS', 'SNEAKERS', 'THRIFT', 'TOYS', 'CAMERAS', 'RECORDS', 'ART SUPPLY', 'KEYS MADE',
+];
+const SIGN_STYLES = [
+  ['#b3201f', '#fff4d6'], ['#123a6b', '#ffd34d'], ['#1e1e22', '#f4f1e8'], ['#0f5b3a', '#ffffff'], ['#f2c230', '#1c1c1e'],
+  ['#e8e4d8', '#9a1c1c'], ['#6b1f4a', '#ffd9ef'], ['#202a33', '#7fe3ff'], ['#c4561d', '#ffffff'],
+];
+const SIGN_FONTS = ['bold %px system-ui, sans-serif', 'bold %px Georgia, serif', '900 %px "Arial Black", Impact, sans-serif', 'italic bold %px Georgia, serif'];
+const SIGN_SUBS = ['', 'OPEN 24 HOURS', '', 'EST. 1962', '', '', 'FAMILY OWNED', '', 'SINCE 1987', '', ''];
+export const SIGN_COLS = 2, SIGN_ROWS = 32, SIGN_COUNT = SHOP_NAMES.length;
+export const SIGN_MAT = (() => {
+  const W = 512, H = 64, c = document.createElement('canvas');
+  c.width = W * SIGN_COLS; c.height = H * SIGN_ROWS;
+  const g = c.getContext('2d');
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  SHOP_NAMES.forEach((name, i) => {
+    const x = (i % SIGN_COLS) * W, y = Math.floor(i / SIGN_COLS) * H, [bg, fg] = SIGN_STYLES[i % SIGN_STYLES.length];
+    const font = SIGN_FONTS[(i * 3 >> 1) % SIGN_FONTS.length], sub = SIGN_SUBS[i % SIGN_SUBS.length];
+    g.fillStyle = bg; g.fillRect(x, y, W, H);
+    g.strokeStyle = fg; g.globalAlpha = 0.55; g.lineWidth = 2; g.strokeRect(x + 7, y + 7, W - 14, H - 14); g.globalAlpha = 1;
+    g.fillStyle = fg; g.font = font.replace('%', sub ? 30 : 38);
+    g.fillText(name, x + W / 2, y + (sub ? 27 : H / 2 + 2), W - 44);
+    if (sub) { g.font = 'bold 12px system-ui, sans-serif'; g.fillText(sub, x + W / 2, y + 50, W - 80); }
+  });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  // lit a little, so they still read at zombie night
+  return new THREE.MeshStandardMaterial({ map: t, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.25, roughness: 0.6 });
+})();
+export function signUV(i) {
+  const c = i % SIGN_COLS, r = Math.floor(i / SIGN_COLS), du = 2 / (512 * SIGN_COLS), dv = 2 / (64 * SIGN_ROWS);
+  return [c / SIGN_COLS + du, 1 - (r + 1) / SIGN_ROWS + dv, (c + 1) / SIGN_COLS - du, 1 - r / SIGN_ROWS - dv];
 }
 
 // ---------- Street props ----------
